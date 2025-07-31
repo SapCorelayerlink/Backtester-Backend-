@@ -224,6 +224,17 @@ class IBKRBroker(BrokerBase):
         if not self.ib.isConnected():
             raise HTTPException(status_code=503, detail="Broker not connected.")
 
+        # --- Timeframe Translation for IBKR ---
+        ibkr_timeframe_map = {
+            "1d": "1 day", "1w": "1 week", "1m": "1 month", "1s": "1 secs",
+            "5s": "5 secs", "10s": "10 secs", "15s": "15 secs", "30s": "30 secs",
+            "1min": "1 min", "2min": "2 mins", "3min": "3 mins", "5min": "5 mins",
+            "10min": "10 mins", "15min": "15 mins", "20min": "20 mins", "30min": "30 mins",
+            "1h": "1 hour", "2h": "2 hours", "3h": "3 hours", "4h": "4 hours", "8h": "8 hours"
+        }
+        bar_size = ibkr_timeframe_map.get(timeframe.lower(), timeframe)
+        # --- End Translation ---
+
         contract = Stock(symbol, 'SMART', 'USD')
         
         try:
@@ -251,7 +262,7 @@ class IBKRBroker(BrokerBase):
                 contract=contract,
                 endDateTime=end_dt,
                 durationStr=duration_str,
-                barSizeSetting=timeframe,
+                barSizeSetting=bar_size, # Use the translated bar size
                 whatToShow='TRADES',
                 useRTH=True,
                 formatDate=1
@@ -264,4 +275,13 @@ class IBKRBroker(BrokerBase):
             return pd.DataFrame()
 
         df = util.df(bars)
+
+        if df is not None and not df.empty and 'date' in df.columns:
+            # Explicitly convert to datetime and then set as index
+            df['date'] = pd.to_datetime(df['date'])
+            df.set_index('date', inplace=True)
+            # Ensure the index is a DatetimeIndex
+            if not isinstance(df.index, pd.DatetimeIndex):
+                 raise TypeError("Failed to create DatetimeIndex.")
+
         return df 

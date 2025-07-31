@@ -3,6 +3,7 @@ Implements a simple Moving Average Crossover strategy using the backtesting.py f
 """
 from backtesting import Strategy
 from backtesting.lib import crossover
+from core.registry import StrategyRegistry # Import the registry
 
 # We will need a way to calculate indicators.
 # The backtesting.py library recommends using a function that wraps an indicator library
@@ -25,6 +26,7 @@ def sma(arr: list, n: int) -> list:
     return res
 
 
+@StrategyRegistry.register("MACrossover") # Add the registration decorator
 class MACrossover(Strategy):
     """
     A simple moving average crossover strategy.

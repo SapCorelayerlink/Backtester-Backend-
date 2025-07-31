@@ -222,11 +222,31 @@ async def get_smart_data(
             broker_data = await broker.get_historical_data(symbol, ibkr_timeframe, fetch_start_date.strftime('%Y-%m-%d'), end_date)
             
             if broker_data is not None and not broker_data.empty:
-                # Ensure columns are capitalized before saving
+                # ---> START FIX: Standardize broker data to match DB schema <---
+                
+                # 1. Rename 'date' column to 'timestamp' if it exists
+                if 'date' in broker_data.columns:
+                    broker_data.rename(columns={'date': 'timestamp'}, inplace=True)
+
+                # 2. Ensure timestamp is the index
+                if 'timestamp' in broker_data.columns:
+                    broker_data['timestamp'] = pd.to_datetime(broker_data['timestamp'])
+                    broker_data.set_index('timestamp', inplace=True)
+                elif not isinstance(broker_data.index, pd.DatetimeIndex):
+                     # If no timestamp column, assume index is what we need
+                    broker_data.index = pd.to_datetime(broker_data.index)
+                
+                # 3. Drop columns that don't exist in the DB
+                db_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+                cols_to_drop = [col for col in broker_data.columns if col not in db_columns and col.lower() not in [c.lower() for c in db_columns]]
+                broker_data.drop(columns=cols_to_drop, inplace=True, errors='ignore')
+
+                # 4. Ensure columns are capitalized before saving
                 broker_data.rename(columns={
                     'open': 'Open', 'high': 'High', 'low': 'Low',
                     'close': 'Close', 'volume': 'Volume'
                 }, inplace=True)
+                # ---> END FIX <---
 
                 # Save the newly fetched data to our database
                 # Ensure the base timeframe is used for saving

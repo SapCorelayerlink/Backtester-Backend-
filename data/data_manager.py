@@ -84,15 +84,33 @@ class DataManager:
             raise ValueError("DataFrame index must be a DatetimeIndex.")
 
         df_copy = bars_df.copy()
-        # We always store as '1min' now, as this is our base resolution
-        df_copy['symbol'] = symbol
-        df_copy['timeframe'] = '1min'
+        
+        # ---> START FIX: Force DataFrame to match the database schema <---
+        
+        # 1. Reset index to make 'timestamp' a column to work with
         df_copy.reset_index(inplace=True)
-        df_copy.rename(columns={
-            'index': 'timestamp', 'Open': 'open', 'High': 'high',
-            'Low': 'low', 'Close': 'close', 'Volume': 'volume'
-        }, inplace=True)
+        
+        # 2. Define the exact columns of the database table
+        db_schema = {
+            'timestamp': 'timestamp', 'date': 'timestamp', # Allow 'date' as an alias for 'timestamp'
+            'open': 'open', 'Open': 'open',
+            'high': 'high', 'High': 'high',
+            'low': 'low', 'Low': 'low',
+            'close': 'close', 'Close': 'close',
+            'volume': 'volume', 'Volume': 'volume'
+        }
+        df_copy.rename(columns=db_schema, inplace=True)
 
+        # 3. Add symbol and timeframe
+        df_copy['symbol'] = symbol
+        df_copy['timeframe'] = '1min' # Always save as base timeframe
+
+        # 4. Keep only the columns that exist in the database and are required.
+        final_columns = ['timestamp', 'symbol', 'timeframe', 'open', 'high', 'low', 'close', 'volume']
+        cols_to_keep = [col for col in final_columns if col in df_copy.columns]
+        df_copy = df_copy[cols_to_keep]
+        # ---> END FIX <---
+        
         try:
             df_copy.to_sql(
                 'market_data', 
