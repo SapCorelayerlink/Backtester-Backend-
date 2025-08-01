@@ -30,6 +30,38 @@ class StrategyBase(ABC):
         """
         pass
 
+    async def run(self):
+        """
+        Default run loop for the strategy. Fetches historical data and calls on_bar for each row.
+        """
+        await self.init()
+        
+        print(f"[{self.name}] Fetching historical data for {self.params.get('symbol')}...")
+        
+        # This uses the broker instance that was passed to the strategy during creation.
+        data = await self.broker.get_historical_data(
+            symbol=self.params.get('symbol'),
+            timeframe=self.params.get('timeframe'),
+            start_date=self.params.get('start_date', '2023-01-01'),
+            end_date=self.params.get('end_date', '2024-01-01')
+        )
+        
+        if data is None or data.empty:
+            print(f"[{self.name}] No data returned. Stopping strategy.")
+            return
+
+        print(f"[{self.name}] Data fetched. Running strategy on {len(data)} bars...")
+
+        # Iterate through the historical data and call on_bar for each time step
+        for timestamp, bar in data.iterrows():
+            # Add timestamp to bar data for strategies to use
+            bar_with_ts = bar.copy()
+            bar_with_ts['timestamp'] = timestamp
+            await self.on_bar(bar_with_ts)
+            
+        print(f"[{self.name}] Strategy run complete.")
+
+
 class BrokerBase(ABC):
     """
     Abstract base class for all broker interfaces.

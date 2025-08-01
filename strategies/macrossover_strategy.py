@@ -1,73 +1,71 @@
-"""
-Implements a simple Moving Average Crossover strategy using the backtesting.py framework.
-"""
-from backtesting import Strategy
-from backtesting.lib import crossover
-from core.registry import StrategyRegistry # Import the registry
+import pandas as pd
+from core.base import StrategyBase
+from core.registry import StrategyRegistry
 
-# We will need a way to calculate indicators.
-# The backtesting.py library recommends using a function that wraps an indicator library
-# like TA-Lib or pandas-ta. For simplicity, we'll create a simple moving average function here.
-def sma(arr: list, n: int) -> list:
-    """Returns the simple moving average of a list."""
-    if len(arr) < n:
-        return [float('nan')] * len(arr)
-    
-    res = [float('nan')] * (n - 1)
-    # Calculate the first SMA
-    first_sma = sum(arr[:n]) / n
-    res.append(first_sma)
-
-    # Efficiently calculate the rest of the SMAs
-    for i in range(n, len(arr)):
-        next_sma = res[-1] + (arr[i] - arr[i-n]) / n
-        res.append(next_sma)
+@StrategyRegistry.register("MACrossover")
+class MACrossover(StrategyBase):
+    """
+    A Moving Average Crossover strategy adapted for the custom framework.
+    """
+    def __init__(self, name: str, broker: 'BrokerBase', params: dict = None):
+        super().__init__(name, broker, params)
+        self.n1 = self.params.get('n1', 10)  # Short-term window
+        self.n2 = self.params.get('n2', 30)  # Long-term window
+        self.symbol = self.params.get('symbol', 'AAPL')
+        self.timeframe = self.params.get('timeframe', '1d')
         
-    return res
+        # Internal state for the strategy
+        self.prices = []
+        self.sma1 = []
+        self.sma2 = []
 
-
-@StrategyRegistry.register("MACrossover") # Add the registration decorator
-class MACrossover(Strategy):
-    """
-    A simple moving average crossover strategy.
-    
-    When the shorter MA crosses above the longer MA, it's a buy signal.
-    When the shorter MA crosses below the longer MA, it's a sell signal.
-    """
-    # Define the two MA windows as class variables.
-    # These can be optimized by the backtesting framework.
-    n1 = 10  # Short-term window
-    n2 = 30  # Long-term window
-    stop_loss_pct = 0.05 # Default stop-loss percentage (e.g., 5%)
-
-    def init(self):
+    async def init(self):
         """
-        Called once at the start of the backtest.
-        Used to initialize indicators and other strategy state.
+        Initialize the strategy by pre-loading historical data to warm up the indicators.
         """
-        # `self.data.Close` is a numpy array of the close prices
-        close = self.data.Close
-        # Calculate the two moving averages
-        self.sma1 = self.I(sma, close, self.n1)
-        self.sma2 = self.I(sma, close, self.n2)
+        print(f"Initializing {self.name} strategy with short window {self.n1} and long window {self.n2}.")
+        
+        # Load enough historical data to calculate the longest moving average
+        # In a real scenario, you'd fetch this from the broker/data_manager
+        # For this example, we'll start with an empty list.
+        # A more robust implementation would pre-fill `self.prices` here.
+        print(f"{self.name}: Initialization complete.")
 
-    def next(self):
+    async def on_bar(self, bar_data: pd.Series):
         """
-        Called for each bar in the backtest.
-        This is where the trading logic resides.
+        Called for each new bar of data. Implements the core trading logic.
         """
-        # Calculate stop-loss price
-        sl_price_long = self.data.Close[-1] * (1 - self.stop_loss_pct)
-        sl_price_short = self.data.Close[-1] * (1 + self.stop_loss_pct)
+        # Append the new closing price to our price list
+        self.prices.append(bar_data['Close'])
 
-        # If the short MA crosses above the long MA, close any existing short
-        # position and open a new long position with a stop-loss.
-        if crossover(self.sma1, self.sma2):
-            self.position.close()
-            self.buy(sl=sl_price_long)
+        # Don't do anything until we have enough data for the longest MA
+        if len(self.prices) < self.n2:
+            return
 
-        # If the short MA crosses below the long MA, close any existing long
-        # position and open a new short position with a stop-loss.
-        elif crossover(self.sma2, self.sma1):
-            self.position.close()
-            self.sell(sl=sl_price_short) 
+        # --- Calculate Indicators ---
+        # In a real strategy, you would use a more efficient library (like pandas-ta or TALib)
+        # to calculate indicators rather than doing it manually on each bar.
+        current_sma1 = sum(self.prices[-self.n1:]) / self.n1
+        current_sma2 = sum(self.prices[-self.n2:]) / self.n2
+        
+        # We need the previous bar's SMAs to check for a crossover
+        if len(self.sma1) > 0:
+            prev_sma1 = self.sma1[-1]
+            prev_sma2 = self.sma2[-1]
+            
+            # --- Crossover Logic ---
+            # Buy signal: Short MA crosses above Long MA
+            if current_sma1 > current_sma2 and prev_sma1 <= prev_sma2:
+                print(f"{bar_data['timestamp']}: BUY SIGNAL for {self.symbol} at {bar_data['Close']:.2f}")
+                # In a live scenario, you would place an order:
+                # await self.broker.place_order({'symbol': self.symbol, 'qty': 1, 'side': 'buy'})
+
+            # Sell signal: Short MA crosses below Long MA
+            elif current_sma1 < current_sma2 and prev_sma1 >= prev_sma2:
+                print(f"{bar_data['timestamp']}: SELL SIGNAL for {self.symbol} at {bar_data['Close']:.2f}")
+                # In a live scenario, you would place an order:
+                # await self.broker.place_order({'symbol': self.symbol, 'qty': 1, 'side': 'sell'})
+
+        # Update the history of our SMAs
+        self.sma1.append(current_sma1)
+        self.sma2.append(current_sma2) 

@@ -403,8 +403,8 @@ async def start_strategy(req: StartStrategyRequest):
         strategy_cls = StrategyRegistry.get(req.name)
         broker_instance = get_broker(req.broker)
         
-        # Create a new instance for this run
-        strategy_instance = strategy_cls(name=req.name, broker=broker_instance, **req.params)
+        # Create a new instance for this run, passing params as a single dictionary
+        strategy_instance = strategy_cls(name=req.name, broker=broker_instance, params=req.params)
         
         # Run the strategy in the background
         loop = asyncio.get_running_loop()
