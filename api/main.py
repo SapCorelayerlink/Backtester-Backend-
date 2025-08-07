@@ -12,13 +12,9 @@ from logging.handlers import RotatingFileHandler
 import importlib
 import os
 from fastapi.responses import FileResponse, HTMLResponse
-from backtesting import Backtest
 import pandas as pd
 import numpy as np
 import json
-import quantstats as qs
-from jinja2 import Environment, FileSystemLoader
-from bokeh.embed import components
 from datetime import datetime, timedelta
 import asyncio
 
@@ -51,11 +47,21 @@ async def lifespan(app: FastAPI):
     print("DataManager initialized.")
     
     print("Application starting up...")
-    await ibkr_manager.connect()
+    try:
+        await ibkr_manager.connect()
+    except Exception as e:
+        print(f"Warning: IBKR connection failed: {e}")
+        print("Continuing without IBKR connection...")
+    
     yield
+    
     # Shutdown
     print("Application shutting down...")
-    ibkr_manager.disconnect()
+    try:
+        if hasattr(ibkr_manager, 'disconnect'):
+            ibkr_manager.disconnect()
+    except Exception as e:
+        print(f"Warning: Error during IBKR disconnect: {e}")
 
 app = FastAPI(
     title="TradeFlow AI: Algo Trading Platform",
@@ -167,9 +173,47 @@ class HistoricalData(BaseModel):
 class StrategyStatus(BaseModel):
     status: str
     strategy: str
+    run_id: Optional[str] = None
+    message: Optional[str] = None
 
 class RunningStrategies(BaseModel):
     running_strategies: List[str]
+
+# -- Backtest Results Models --
+class Trade(BaseModel):
+    entry_time: str
+    exit_time: str
+    symbol: str
+    quantity: float
+    side: str
+    entry_price: float
+    exit_price: float
+    pnl: float
+
+class BacktestSummary(BaseModel):
+    total_trades: int
+    winning_trades: int
+    losing_trades: int
+    win_rate: float
+    total_pnl: float
+    average_trade_pnl: float
+
+class BacktestResult(BaseModel):
+    run_id: str
+    strategy_name: str
+    start_time: Optional[str]
+    end_time: Optional[str]
+    initial_capital: float
+    final_equity: float
+    total_return: float
+    total_return_pct: float
+    equity_curve: List[List[str]]
+    trades: List[Trade]
+    summary: BacktestSummary
+    parameters: Dict[str, Any]
+
+class BacktestResultsList(BaseModel):
+    run_ids: List[str]
 
 # -- API Request Models --
 class OrderDetails(BaseModel):
@@ -384,8 +428,7 @@ async def websocket_market_data(
             await asyncio.sleep(1) # Give a moment for cleanup
         logging.info(f"WebSocket for {symbol} closed and cleaned up.")
 
-# --- Strategy Endpoints (To be refactored similarly) ---
-# ... (Keeping strategy endpoints as they are for now)
+# --- Strategy Endpoints ---
 class StartStrategyRequest(BaseModel):
     name: str
     broker: str
@@ -394,8 +437,12 @@ class StartStrategyRequest(BaseModel):
 class StopStrategyRequest(BaseModel):
     name: str
 
-@strategy_router.post("/start", summary="Start a strategy", response_model=StrategyStatus)
+@strategy_router.post("/start", summary="Start a strategy backtest", response_model=StrategyStatus)
 async def start_strategy(req: StartStrategyRequest):
+    """
+    Start a strategy backtest using the custom engine.
+    This runs a complete backtest and saves results to JSON.
+    """
     if req.name in running_strategies:
         raise HTTPException(status_code=400, detail="Strategy is already running.")
     
@@ -406,12 +453,28 @@ async def start_strategy(req: StartStrategyRequest):
         # Create a new instance for this run, passing params as a single dictionary
         strategy_instance = strategy_cls(name=req.name, broker=broker_instance, params=req.params)
         
-        # Run the strategy in the background
-        loop = asyncio.get_running_loop()
-        task = loop.create_task(strategy_instance.run())
+        # Run the strategy in a background task to avoid blocking the API response
+        async def run_strategy_background():
+            try:
+                run_id = await strategy_instance.run()
+                if run_id:
+                    print(f"Strategy {req.name} completed successfully with run_id: {run_id}")
+                else:
+                    print(f"Strategy {req.name} failed: No data available")
+            except Exception as e:
+                print(f"Strategy {req.name} failed with error: {e}")
+            finally:
+                # Clean up from running strategies
+                if req.name in running_strategies:
+                    del running_strategies[req.name]
+        
+        # Start the background task
+        task = asyncio.create_task(run_strategy_background())
         running_strategies[req.name] = task
         
-        return {"status": "started", "strategy": req.name}
+        # Return immediately with a "started" status
+        return {"status": "started", "strategy": req.name, "message": "Strategy backtest started successfully"}
+            
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Strategy '{req.name}' not found.")
     except Exception as e:
@@ -434,117 +497,166 @@ async def stop_strategy(req: StopStrategyRequest):
 def list_running_strategies():
     return {"running_strategies": list(running_strategies.keys())}
 
-@broker_router.get("/{broker_name}/backtest", summary="Run a backtest for a strategy", response_class=HTMLResponse)
-async def run_backtest(
-    broker: BrokerBase = Depends(get_broker),
-    strategy_name: str = Query(..., description="The class name of the strategy to test (e.g., 'MACrossover')."),
-    symbol: str = Query(..., description="The ticker symbol to fetch data for."),
-    timeframe: str = Query("1 day", description="The bar size (e.g., '1 day', '1 hour')."),
-    start_date: str = Query(..., description="Start date in YYYY-MM-DD format."),
-    end_date: str = Query(..., description="End date in YYYY-MM-DD format."),
-    cash: int = Query(10000, description="Initial cash for the backtest."),
-    commission: float = Query(0.002, description="Commission per trade."),
-    stop_loss_pct: float = Query(0.05, description="Stop-loss percentage (e.g., 0.05 for 5%).")
-):
+@strategy_router.get("/available", summary="List available strategies", response_model=StrategyList)
+def list_available_strategies():
+    """List all available strategies that can be run."""
+    from core.registry import StrategyRegistry
+    strategies = StrategyRegistry.list()
+    return {"strategies": strategies}
+
+@strategy_router.get("/status/{strategy_name}", summary="Get strategy status", response_model=StrategyStatus)
+async def get_strategy_status(strategy_name: str):
+    """Get the status of a running strategy."""
+    if strategy_name in running_strategies:
+        task = running_strategies[strategy_name]
+        if task.done():
+            try:
+                # Task completed, check if there are any new results
+                result = task.result()
+                return {"status": "completed", "strategy": strategy_name, "message": "Strategy completed successfully"}
+            except Exception as e:
+                return {"status": "failed", "strategy": strategy_name, "message": f"Strategy failed: {str(e)}"}
+        else:
+            return {"status": "running", "strategy": strategy_name, "message": "Strategy is currently running"}
+    else:
+        return {"status": "not_found", "strategy": strategy_name, "message": "Strategy not found or not running"}
+
+@strategy_router.get("/results/{run_id}", summary="Get backtest results by run ID", response_model=BacktestResult)
+async def get_backtest_results(run_id: str):
+    """
+    Retrieve backtest results for a specific run ID from database.
+    """
     try:
-        # --- Timeframe Translation ---
-        # Translate user-friendly timeframes to library-friendly formats
-        timeframe_map = {
-            "1 day": "1d",
-            "1 hour": "1h",
-            "1 minute": "1m"
-            # Add other translations as needed
-        }
-        api_timeframe = timeframe_map.get(timeframe.lower(), timeframe)
-
-        # 1. Fetch data using the smart data endpoint's logic
-        data = await get_smart_data(
-            symbol=symbol,
-            timeframe=api_timeframe, # Use the translated timeframe
-            start_date=start_date,
-            end_date=end_date,
-            broker=broker,
-            data_manager=DataManager() # Create a fresh DataManager for the backtest
-        )
-        # Convert list of dicts back to DataFrame for backtesting.py
-        data_df = pd.DataFrame(data)
-        if data_df.empty:
-            return HTMLResponse(content="<h3>No data available for the selected range.</h3>", status_code=404)
+        from data.backtest_database import BacktestDatabase
+        db = BacktestDatabase()
         
-        data_df['timestamp'] = pd.to_datetime(data_df['timestamp'])
-        data_df.set_index('timestamp', inplace=True)
-        # Rename columns to what backtesting.py expects
-        data_df.rename(columns={
-            'open': 'Open', 'high': 'High', 'low': 'Low',
-            'close': 'Close', 'volume': 'Volume'
-        }, inplace=True)
+        # Try to get from database first
+        results = db.get_backtest_result(run_id)
         
-        # 2. Get the strategy class from the registry
-        strategy_cls = StrategyRegistry.get(strategy_name)
+        if not results:
+            # Fallback to JSON file for backward compatibility
+            results_dir = "backtest_results"
+            filepath = os.path.join(results_dir, f"{run_id}.json")
+            
+            if not os.path.exists(filepath):
+                raise HTTPException(status_code=404, detail=f"Backtest results for run ID '{run_id}' not found.")
+            
+            with open(filepath, 'r') as f:
+                results = json.load(f)
         
-        # Add stop loss parameter to the strategy
-        strategy_cls.stop_loss_pct = stop_loss_pct
-
-        # 3. Run the backtest
-        bt = Backtest(data_df, strategy_cls, cash=cash, commission=commission)
-        stats = bt.run()
+        # Add default values for missing fields to make it more robust
+        results.setdefault('start_time', None)
+        results.setdefault('end_time', None)
+        results.setdefault('equity_curve', [])
+        results.setdefault('trades', [])
+        results.setdefault('summary', {
+            'total_trades': 0,
+            'winning_trades': 0,
+            'losing_trades': 0,
+            'win_rate': 0.0,
+            'total_pnl': 0.0,
+            'average_trade_pnl': 0.0
+        })
+        results.setdefault('parameters', {})
         
-        # --- Generate Report ---
-        # 1. Create a unique filename for the results
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename_base = f"backtest_{strategy_name}_{symbol}_{start_date}_{end_date}_sl_{stop_loss_pct}".replace('.', '_')
-        
-        # Create a directory for results if it doesn't exist
-        results_dir = "results"
-        os.makedirs(results_dir, exist_ok=True)
-
-        plot_filename = os.path.join(results_dir, f"{filename_base}_plot.html")
-        qs_report_filename = os.path.join(results_dir, f"{filename_base}_qs_report.html")
-        trades_filename = os.path.join(results_dir, f"{filename_base}_trades.html")
-        
-        # 2. Generate Bokeh plot
-        bt.plot(filename=plot_filename, open_browser=False)
-
-        # 3. Generate QuantStats report
-        returns = stats['Returns']
-        qs.reports.html(returns, output=qs_report_filename, title=f'{strategy_name} on {symbol}')
-
-        # 4. Save detailed trades to an HTML table
-        trades_df = stats['_trades']
-        trades_df.to_html(trades_filename, escape=False, classes='table table-striped text-center')
-
-        # --- Create a combined HTML response ---
-        env = Environment(loader=FileSystemLoader('api/templates'))
-        template = env.get_template('dashboard.html')
-
-        # Read the content of the generated files
-        with open(plot_filename, 'r') as f:
-            plot_script, plot_div = components(f.read())
-        
-        with open(qs_report_filename, 'r') as f:
-            qs_report_html = f.read()
-
-        with open(trades_filename, 'r') as f:
-            trades_html = f.read()
-
-        html_content = template.render(
-            strategy_name=strategy_name,
-            symbol=symbol,
-            start_date=start_date,
-            end_date=end_date,
-            stats=stats.to_dict(),
-            plot_script=plot_script,
-            plot_div=plot_div,
-            qs_report_html=qs_report_html,
-            trades_html=trades_html
-        )
-        return HTMLResponse(content=html_content)
+        return BacktestResult(**results)
     
-    except KeyError:
-        return HTMLResponse(content=f"<h3>Strategy '{strategy_name}' not found.</h3>", status_code=404)
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"Invalid JSON format in results file: {str(e)}")
     except Exception as e:
-        logging.error(f"Backtest failed: {e}", exc_info=True)
-        return HTMLResponse(content=f"<h3>An error occurred during the backtest: {e}</h3>", status_code=500)
+        raise HTTPException(status_code=500, detail=f"Error loading backtest results: {str(e)}")
+
+@strategy_router.get("/results", summary="List available backtest results", response_model=BacktestResultsList)
+async def list_backtest_results():
+    """
+    List all available backtest result run IDs from database.
+    """
+    try:
+        from data.backtest_database import BacktestDatabase
+        db = BacktestDatabase()
+        
+        # Get run IDs from database
+        run_ids = db.list_backtest_runs()
+        
+        if not run_ids:
+            # Fallback to JSON files for backward compatibility
+            results_dir = "backtest_results"
+            
+            if not os.path.exists(results_dir):
+                return BacktestResultsList(run_ids=[])
+            
+            # Get all JSON files in the results directory
+            for filename in os.listdir(results_dir):
+                if filename.endswith('.json'):
+                    run_id = filename[:-5]  # Remove .json extension
+                    run_ids.append(run_id)
+            
+            # Sort by creation time (newest first)
+            run_ids.sort(key=lambda x: os.path.getctime(os.path.join(results_dir, f"{x}.json")), reverse=True)
+        
+        return BacktestResultsList(run_ids=run_ids)
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error listing backtest results: {str(e)}")
+
+@strategy_router.get("/database/stats", summary="Get database statistics")
+async def get_database_stats():
+    """
+    Get comprehensive database statistics.
+    """
+    try:
+        from data.backtest_database import BacktestDatabase
+        db = BacktestDatabase()
+        stats = db.get_database_stats()
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting database stats: {str(e)}")
+
+@strategy_router.get("/database/strategy/{strategy_name}/performance", summary="Get strategy performance history")
+async def get_strategy_performance(strategy_name: str):
+    """
+    Get performance history for a specific strategy.
+    """
+    try:
+        from data.backtest_database import BacktestDatabase
+        db = BacktestDatabase()
+        performance = db.get_strategy_performance(strategy_name)
+        return {"strategy_name": strategy_name, "performance_history": performance}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting strategy performance: {str(e)}")
+
+@strategy_router.get("/database/runs/{run_id}/trades", summary="Get detailed trade history")
+async def get_trade_history(run_id: str):
+    """
+    Get detailed trade history for a specific backtest run.
+    """
+    try:
+        from data.backtest_database import BacktestDatabase
+        db = BacktestDatabase()
+        trades = db.get_trade_history(run_id)
+        return {"run_id": run_id, "trades": trades}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting trade history: {str(e)}")
+
+@strategy_router.delete("/database/runs/{run_id}", summary="Delete backtest run")
+async def delete_backtest_run(run_id: str):
+    """
+    Delete a backtest run and all associated data from the database.
+    """
+    try:
+        from data.backtest_database import BacktestDatabase
+        db = BacktestDatabase()
+        success = db.delete_backtest_run(run_id)
+        if success:
+            return {"message": f"Backtest run {run_id} deleted successfully"}
+        else:
+            raise HTTPException(status_code=404, detail=f"Backtest run {run_id} not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting backtest run: {str(e)}")
+
+# Remove the obsolete backtesting.py endpoint
+# @broker_router.get("/{broker_name}/backtest", summary="Run a backtest for a strategy", response_class=HTMLResponse)
+# async def run_backtest(...) - REMOVED
 
 @app.get("/results/{filepath:path}")
 async def get_results_file(filepath: str):
@@ -553,6 +665,14 @@ async def get_results_file(filepath: str):
     if os.path.exists(file_path):
         return FileResponse(file_path)
     raise HTTPException(status_code=404, detail="File not found.")
+
+@app.get("/backtest-report", summary="Backtest Report Frontend")
+async def get_backtest_report():
+    """Serves the backtest report frontend."""
+    file_path = "frontend/backtest_report.html"
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    raise HTTPException(status_code=404, detail="Backtest report frontend not found.")
 
 # --- Root and Health Check ---
 @app.get("/", summary="Root endpoint with links to API docs")
@@ -575,8 +695,6 @@ app.include_router(data_router)
 import brokers.mock_broker
 import strategies.sample_strategy
 import brokers.ibkr_broker
-# Import new strategy for auto-discovery, though dynamic import handles it
-try:
-    import strategies.ma_crossover_strategy
-except ImportError:
-    pass 
+# Import strategies for auto-discovery
+import strategies.macrossover_strategy
+import strategies.simple_trading_strategy 

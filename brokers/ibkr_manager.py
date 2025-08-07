@@ -39,5 +39,9 @@ class IBKRManager:
             self.ib.disconnect()
         print("Disconnected.")
 
+    def is_connected(self):
+        """Returns True if connected to IBKR."""
+        return self.ib.isConnected()
+
 # Create a single, global instance of the manager
 ibkr_manager = IBKRManager() 

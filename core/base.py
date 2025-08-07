@@ -1,6 +1,10 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 import pandas as pd
+import json
+import os
+from datetime import datetime
+import uuid
 
 class StrategyBase(ABC):
     """
@@ -12,6 +16,14 @@ class StrategyBase(ABC):
         self.name = name
         self.broker = broker
         self.params = params or {}
+        
+        # Backtest result tracking
+        self.equity_curve = []
+        self.trades = []
+        self.initial_capital = 0
+        self.current_equity = 0
+        self.start_time = None
+        self.end_time = None
 
     @abstractmethod
     async def init(self):
@@ -30,9 +42,126 @@ class StrategyBase(ABC):
         """
         pass
 
+    def record_trade(self, entry_time: datetime, exit_time: datetime, symbol: str, 
+                    quantity: float, side: str, entry_price: float, exit_price: float, pnl: float):
+        """
+        Record a completed trade for result tracking.
+        """
+        trade = {
+            "entry_time": entry_time.isoformat(),
+            "exit_time": exit_time.isoformat(),
+            "symbol": symbol,
+            "quantity": quantity,
+            "side": side,
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "pnl": pnl
+        }
+        self.trades.append(trade)
+
+    def update_equity(self, timestamp: datetime, equity: float):
+        """
+        Update the equity curve with current equity value.
+        """
+        self.equity_curve.append([timestamp.isoformat(), equity])
+        self.current_equity = equity
+
+    def save_backtest_results(self, run_id: str = None) -> str:
+        """
+        Save backtest results to both JSON file and database.
+        Returns the run_id used for the file.
+        """
+        if run_id is None:
+            run_id = f"{self.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
+        
+        # Create backtest_results directory if it doesn't exist
+        results_dir = "backtest_results"
+        os.makedirs(results_dir, exist_ok=True)
+        
+        # Calculate summary metrics
+        total_trades = len(self.trades)
+        winning_trades = len([t for t in self.trades if t['pnl'] > 0])
+        win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
+        total_pnl = sum(t['pnl'] for t in self.trades)
+        
+        # Calculate advanced metrics
+        sharpe_ratio = 0
+        max_drawdown = 0
+        
+        if len(self.equity_curve) > 1:
+            # Calculate Sharpe Ratio (simplified)
+            returns = []
+            for i in range(1, len(self.equity_curve)):
+                prev_equity = float(self.equity_curve[i-1][1])
+                curr_equity = float(self.equity_curve[i][1])
+                daily_return = (curr_equity - prev_equity) / prev_equity if prev_equity > 0 else 0
+                returns.append(daily_return)
+            
+            if returns:
+                avg_return = sum(returns) / len(returns)
+                std_return = (sum((r - avg_return) ** 2 for r in returns) / len(returns)) ** 0.5
+                sharpe_ratio = avg_return / std_return if std_return > 0 else 0
+            
+            # Calculate Max Drawdown
+            peak = float(self.equity_curve[0][1])
+            max_drawdown = 0
+            for timestamp, equity in self.equity_curve:
+                equity_val = float(equity)
+                if equity_val > peak:
+                    peak = equity_val
+                drawdown = (peak - equity_val) / peak if peak > 0 else 0
+                max_drawdown = max(max_drawdown, drawdown)
+            max_drawdown *= 100  # Convert to percentage
+        
+        # Prepare results data
+        results = {
+            "run_id": run_id,
+            "strategy_name": self.name,
+            "start_time": self.start_time.isoformat() if self.start_time else None,
+            "end_time": self.end_time.isoformat() if self.end_time else None,
+            "initial_capital": self.initial_capital,
+            "final_equity": self.current_equity,
+            "total_return": self.current_equity - self.initial_capital,
+            "total_return_pct": ((self.current_equity - self.initial_capital) / self.initial_capital * 100) if self.initial_capital > 0 else 0,
+            "equity_curve": [[timestamp, str(equity)] for timestamp, equity in self.equity_curve],
+            "trades": self.trades,
+            "summary": {
+                "total_trades": total_trades,
+                "winning_trades": winning_trades,
+                "losing_trades": total_trades - winning_trades,
+                "win_rate": win_rate,
+                "total_pnl": total_pnl,
+                "average_trade_pnl": total_pnl / total_trades if total_trades > 0 else 0
+            },
+            "parameters": self.params,
+            "sharpe_ratio": sharpe_ratio,
+            "max_drawdown": max_drawdown
+        }
+        
+        # Save to JSON file (for backward compatibility)
+        filename = f"{run_id}.json"
+        filepath = os.path.join(results_dir, filename)
+        
+        with open(filepath, 'w') as f:
+            json.dump(results, f, indent=2, default=str)
+        
+        # Save to database
+        try:
+            from data.backtest_database import BacktestDatabase
+            db = BacktestDatabase()
+            db.save_backtest_result(results)
+            print(f"Backtest results saved to database: {run_id}")
+        except Exception as e:
+            print(f"Warning: Could not save to database: {e}")
+        
+        print(f"Backtest results saved to: {filepath}")
+        return run_id
+
     async def run(self):
         """
         Default run loop for the strategy. Fetches historical data and calls on_bar for each row.
+        Enhanced to track results and save them after completion.
+        Returns the run_id for tracking.
         """
         await self.init()
         
@@ -48,9 +177,17 @@ class StrategyBase(ABC):
         
         if data is None or data.empty:
             print(f"[{self.name}] No data returned. Stopping strategy.")
-            return
+            return None
 
         print(f"[{self.name}] Data fetched. Running strategy on {len(data)} bars...")
+
+        # Initialize backtest tracking
+        self.start_time = data.index[0] if not data.empty else None
+        self.end_time = data.index[-1] if not data.empty else None
+        self.initial_capital = self.params.get('initial_capital', 10000)
+        self.current_equity = self.initial_capital
+        self.equity_curve = []
+        self.trades = []
 
         # Iterate through the historical data and call on_bar for each time step
         for timestamp, bar in data.iterrows():
@@ -59,7 +196,15 @@ class StrategyBase(ABC):
             bar_with_ts['timestamp'] = timestamp
             await self.on_bar(bar_with_ts)
             
+            # Update equity curve (assuming current equity is tracked by the strategy)
+            self.update_equity(timestamp, self.current_equity)
+            
         print(f"[{self.name}] Strategy run complete.")
+        
+        # Save results and return run_id
+        run_id = self.save_backtest_results()
+        print(f"[{self.name}] Results saved with run_id: {run_id}")
+        return run_id
 
 
 class BrokerBase(ABC):
@@ -120,7 +265,7 @@ class BrokerBase(ABC):
         pass
 
     @abstractmethod
-    def get_historical_data(self, symbol: str, timeframe: str, start_date: str, end_date: str) -> pd.DataFrame:
+    async def get_historical_data(self, symbol: str, timeframe: str, start_date: str, end_date: str) -> pd.DataFrame:
         """
         Get historical OHLCV market data for a specific symbol and timeframe.
         """

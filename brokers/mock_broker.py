@@ -3,6 +3,7 @@ from core.registry import BrokerRegistry
 from typing import Dict, Any
 import logging
 import pandas as pd
+import numpy as np
 import asyncio
 from datetime import datetime
 
@@ -82,16 +83,44 @@ class MockBroker(BrokerBase):
             logging.info(f"MockBroker: Market data stream for {symbol} cancelled.")
 
     async def get_historical_data(self, symbol: str, timeframe: str, start_date: str, end_date: str) -> pd.DataFrame:
-        logging.info(f"MockBroker: Getting historical data for {symbol} from {start_date} to {end_date}")
-        # Return a sample DataFrame
-        try:
-            dates = pd.to_datetime([start_date, end_date])
-            df = pd.DataFrame(index=pd.date_range(start=dates[0], end=dates[1], freq='D'))
-            df['Open'] = [100 + i for i in range(len(df))]
-            df['High'] = [105 + i for i in range(len(df))]
-            df['Low'] = [95 + i for i in range(len(df))]
-            df['Close'] = [102 + i for i in range(len(df))]
-            df['Volume'] = [10000 + (i*100) for i in range(len(df))]
-            return df
-        except (ValueError, IndexError):
-            return pd.DataFrame() 
+        """Generate realistic historical data for backtesting."""
+        print(f"MockBroker: Getting historical data for {symbol} from {start_date} to {end_date}")
+        
+        # Create date range
+        start_dt = pd.to_datetime(start_date)
+        end_dt = pd.to_datetime(end_date)
+        date_range = pd.date_range(start=start_dt, end=end_dt, freq='D')
+        
+        # Generate realistic stock data
+        base_price = 150.0  # Starting price
+        data = []
+        
+        for i, date in enumerate(date_range):
+            # Simulate realistic price movements
+            daily_return = np.random.normal(0.001, 0.02)  # 0.1% mean, 2% volatility
+            base_price *= (1 + daily_return)
+            
+            # Generate OHLC data
+            open_price = base_price * (1 + np.random.normal(0, 0.005))
+            high_price = max(open_price, base_price) * (1 + abs(np.random.normal(0, 0.01)))
+            low_price = min(open_price, base_price) * (1 - abs(np.random.normal(0, 0.01)))
+            close_price = base_price
+            
+            # Ensure high >= max(open, close) and low <= min(open, close)
+            high_price = max(high_price, open_price, close_price)
+            low_price = min(low_price, open_price, close_price)
+            
+            data.append({
+                'Open': round(open_price, 2),
+                'High': round(high_price, 2),
+                'Low': round(low_price, 2),
+                'Close': round(close_price, 2),
+                'Volume': int(1000000 + np.random.normal(0, 200000))
+            })
+        
+        df = pd.DataFrame(data, index=date_range)
+        print(f"MockBroker: Generated {len(df)} days of data for {symbol}")
+        print(f"MockBroker: DataFrame shape: {df.shape}")
+        print(f"MockBroker: DataFrame columns: {df.columns.tolist()}")
+        print(f"MockBroker: First few rows: {df.head()}")
+        return df 
