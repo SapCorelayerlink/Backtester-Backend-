@@ -1,279 +1,384 @@
-# 📊 Stock Screener with AI Agent
+# 📈 Intraday SuperTrend MA Trading Strategy
 
-A modern, AI-powered stock screening application that combines real-time market data with intelligent analysis using LangGraph and the Qwen AI model.
+A professional algorithmic trading system that implements a sophisticated intraday strategy using SuperTrend indicators and Moving Averages. This system is designed to work with Interactive Brokers (IBKR) through both TWS (Trader Workstation) and IB Gateway for automated trading and backtesting.
 
-![Stock Screener](https://img.shields.io/badge/Stock-Screener-blue) ![AI Powered](https://img.shields.io/badge/AI-Powered-green) ![React](https://img.shields.io/badge/React-18-blue) ![Python](https://img.shields.io/badge/Python-3.8+-green) ![LangGraph](https://img.shields.io/badge/LangGraph-Latest-orange)
+## 🎯 Strategy Overview
+
+The **Intraday SuperTrend MA Strategy** combines two powerful technical indicators:
+
+- **3-Hour SuperTrend**: Provides overall market direction (bullish/bearish)
+- **30-Minute Moving Averages**: Generates precise entry and exit signals
+
+### How It Works
+
+1. **Direction Filter**: Uses a 3-hour SuperTrend to determine if the market is bullish (GREEN) or bearish (RED)
+2. **Entry Signals**:
+   - **Long Entry**: When SuperTrend is GREEN and MA5 > MA9 > MA20 > MA50 (all moving averages in ascending order)
+   - **Short Entry**: When SuperTrend is RED and MA5 crosses below MA50
+3. **Exit Signals**:
+   - **Long Exit**: When price closes below the 9-period moving average
+   - **Short Exit**: When price closes above the 9-period moving average
 
 ## 🚀 Features
 
-### Frontend (React + TypeScript)
-- 📈 **Real-time Stock Screeners**: Day gainers, losers, most active, tech stocks, and more
-- 🤖 **AI Chat Interface**: Natural language interaction with stock screening agent
-- 📊 **Technical Analysis Dashboard**: Advanced charting and indicators
-- 🌟 **Market Overview**: Live market sentiment and key metrics
-- 📱 **Responsive Design**: Modern UI with shadcn/ui components
-- ⚡ **Real-time Updates**: Live data streaming and updates
-
-### Backend (Python + LangGraph)
-- 🧠 **LangGraph AI Agent**: Intelligent stock screening powered by Qwen model
-- 🔍 **Yahoo Finance Integration**: Real-time market data and screening
-- 🛡️ **Fallback Support**: Graceful handling of API failures
-- 🌐 **RESTful API**: Clean Flask-based API endpoints
-- 📊 **Structured Output**: Beautiful formatted stock analysis tables
-- 🔄 **Memory Support**: Persistent conversation memory
-
-## 🛠️ Technology Stack
-
-### Frontend
-- **React 18** with TypeScript
-- **Vite** for fast development
-- **Tailwind CSS** for styling
-- **shadcn/ui** for components
-- **Recharts** for data visualization
-- **Lucide React** for icons
-
-### Backend
-- **Python 3.8+** 
-- **LangGraph** for AI agent orchestration
-- **LangChain** for LLM integration
-- **Ollama** with Qwen model
-- **Flask** for REST API
-- **yfinance** for market data
-- **Flask-CORS** for cross-origin requests
+- ✅ **Live Trading** with Interactive Brokers Gateway/TWS
+- ✅ **Historical Backtesting** using real IBKR data
+- ✅ **Automated Risk Management** with stop-loss and take-profit orders
+- ✅ **Real-time Data Processing** with 1-minute bar resolution
+- ✅ **SQLite Database** for efficient data storage and retrieval
+- ✅ **Comprehensive Logging** and trade tracking
+- ✅ **Visual Analytics** with equity curve plotting
+- ✅ **Flexible Configuration** for different symbols and parameters
 
 ## 📋 Prerequisites
 
-Before running the application, ensure you have:
+### Software Requirements
 
-1. **Node.js 18+** and npm
-2. **Python 3.8+** and pip  
-3. **Ollama** with Qwen model
+1. **Python 3.8 or higher**
+2. **Interactive Brokers Account** (paper trading account recommended for testing)
+3. **IBKR Gateway or TWS** installed and configured
 
-### Installing Ollama and Qwen
+### Hardware Requirements
+
+- **RAM**: Minimum 4GB (8GB recommended)
+- **Storage**: At least 1GB free space for data storage
+- **Internet**: Stable broadband connection for real-time data
+
+## 🛠️ Installation
+
+### Step 1: Clone the Repository
 
 ```bash
-# Install Ollama (visit https://ollama.ai for installation instructions)
-# For macOS/Linux:
-curl -fsSL https://ollama.ai/install.sh | sh
-
-# Start Ollama service
-ollama serve
-
-# Pull Qwen model
-ollama pull qwen
+git clone <your-repository-url>
+cd Strategy
 ```
 
-## 🚀 Quick Start
-
-### 1. Clone and Setup
+### Step 2: Install Python Dependencies
 
 ```bash
-git clone <your-repo-url>
-cd stock-stream-viz-99
-
-# Install frontend dependencies
-npm install
-
-# Install backend dependencies
-cd backend
 pip install -r requirements.txt
 ```
 
-### 2. Start the Backend
+### Step 3: Verify Installation
 
 ```bash
-# From the backend directory
-cd backend
-
-# Option 1: Using startup script (recommended)
-python start_server.py
-
-# Option 2: Direct Flask app
-python app.py
-
-# Option 3: Windows users
-start_backend.bat
+python -c "import pandas, numpy, ib_insync, matplotlib; print('All dependencies installed successfully!')"
 ```
 
-The backend will start on `http://localhost:5000`
+## 🔧 IBKR Gateway Setup
 
-### 3. Start the Frontend
+### For Non-Technical Users: Complete IBKR Setup Guide
+
+#### Step 1: Download and Install IB Gateway
+
+1. Visit [Interactive Brokers Download Center](https://www.interactivebrokers.com/en/trading/ib-api.php)
+2. Download **IB Gateway** (recommended) or **TWS**
+3. Install following the setup wizard
+
+#### Step 2: Configure IB Gateway
+
+1. **Launch IB Gateway**
+2. **Login** with your IBKR credentials
+3. **Enable API Access**:
+   - In IB Gateway, go to **Configure** → **Settings** → **API** → **Settings**
+   - Check **"Enable ActiveX and Socket Clients"**
+   - Set **Socket Port** to `4002` (paper trading) or `4001` (live trading)
+   - **Important**: Add `127.0.0.1` to **Trusted IPs**
+   - Set **Master API Client ID** to `1000` (or any high number)
+   - Check **"Read-Only API"** if you only want to backtest (optional)
+
+#### Step 3: Paper Trading Setup (Recommended for Testing)
+
+1. In IB Gateway, select **"Paper Trading"** mode during login
+2. This gives you $1,000,000 virtual money to test strategies safely
+3. Paper trading uses port `4002` by default
+
+#### Step 4: Verify Connection
+
+The system will automatically try to connect to these ports in order:
+- `7497` (TWS Paper Trading)
+- `7496` (TWS Live Trading)  
+- `4002` (Gateway Paper Trading)
+- `4001` (Gateway Live Trading)
+
+## 🎮 Usage
+
+### Quick Start: Running a Backtest
+
+1. **Start IB Gateway** and ensure it's connected
+2. **Run the backtest script**:
 
 ```bash
-# From the main project directory
-npm run dev
+python backtest_ibkr.py
 ```
 
-The frontend will start on `http://localhost:5173`
+This will:
+- Connect to IBKR Gateway automatically
+- Download 5 years of QQQ historical data
+- Run the strategy simulation
+- Generate results in `backtests/QQQ/[timestamp]/`
 
-### 4. Test the Integration
+### Live Trading Test
 
+To test the strategy with live market data (paper trading recommended):
+
+```python
+import asyncio
+from intraday_supertrend_ma_strategy import IntradaySupertrendMA
+from brokers.ibkr_manager import ibkr_manager
+
+# Create strategy instance
+params = {
+    'symbol': 'QQQ',
+    'quantity': 100,
+    'starting_equity': 100000.0
+}
+
+strategy = IntradaySupertrendMA("Live Test", ibkr_manager, params)
+
+# Run live test for 5 minutes
+asyncio.run(strategy.test_with_ibkr_gateway(symbol='QQQ', test_duration_minutes=5))
+```
+
+## ⚙️ Configuration
+
+### Strategy Parameters
+
+The strategy accepts these configurable parameters:
+
+```python
+params = {
+    # Symbol and Timeframes
+    'symbol': 'QQQ',                    # Trading symbol
+    'base_timeframe': '1min',           # Base data timeframe
+    'ma_timeframe': '30min',            # Moving average timeframe
+    'supertrend_timeframe': '3h',       # SuperTrend timeframe
+    
+    # SuperTrend Settings
+    'supertrend_length': 10,            # SuperTrend period
+    'supertrend_multiplier': 3.0,       # SuperTrend multiplier
+    
+    # Moving Average Settings
+    'ma_type': 'SMA',                   # 'SMA' or 'EMA'
+    'ma5_period': 5,                    # Fast MA period
+    'ma9_period': 9,                    # Signal MA period
+    'ma20_period': 20,                  # Medium MA period
+    'ma50_period': 50,                  # Slow MA period
+    
+    # Trading Settings
+    'quantity': 100,                    # Position size
+    'stop_loss_pct': 0.02,             # Stop loss (2%)
+    'take_profit_pct': 0.03,           # Take profit (3%)
+    'use_bracket_orders': True,         # Use stop/target orders
+    'place_market_orders': True,        # Use market vs limit orders
+    
+    # Risk Management
+    'starting_equity': 100000.0,        # Starting capital
+    
+    # Data Settings
+    'backfill_days': 5,                 # Days of historical data
+    'persist_resampled': True,          # Save resampled data
+    
+    # Trading Hours (US Eastern Time)
+    'trading_hours': {
+        'start': time(9, 30),           # Market open
+        'end': time(16, 0)              # Market close
+    }
+}
+```
+
+### Supported Symbols
+
+The strategy works with any US equities, popular choices:
+- **QQQ** (Nasdaq ETF) - Default, highly liquid
+- **SPY** (S&P 500 ETF) - Large cap focus
+- **AAPL** (Apple) - Individual stock example
+- **TSLA** (Tesla) - High volatility stock
+
+## 📊 Understanding Results
+
+### Backtest Output
+
+Each backtest creates a timestamped folder with:
+
+1. **`trades.csv`** - Complete trade log with:
+   - Entry/exit times and prices
+   - Position size and direction (long/short)
+   - Profit/loss per trade
+
+2. **`equity_curve.csv`** - Portfolio value over time
+3. **`equity_curve.png`** - Visual equity curve chart
+4. **`status.txt`** - Execution log and connection details
+
+### Sample Results Interpretation
+
+```
+Total trades: 15
+Ending equity: 102,350.00
+Win Rate: 73.3%
+```
+
+This means:
+- 15 trades were executed
+- $2,350 profit on $100,000 starting capital (2.35% return)
+- 11 out of 15 trades were profitable
+
+## 🚨 Troubleshooting
+
+### Common Issues and Solutions
+
+#### 1. "Unable to connect to IBKR Gateway/TWS"
+
+**Symptoms**: Connection errors when running scripts
+
+**Solutions**:
+- ✅ Ensure IB Gateway/TWS is running and logged in
+- ✅ Check API settings are enabled (see Setup Guide above)
+- ✅ Verify the correct port is being used (4002 for paper, 4001 for live)
+- ✅ Add `127.0.0.1` to Trusted IPs in Gateway settings
+- ✅ Try different client IDs if you get "client id already in use"
+
+#### 2. "No market data received"
+
+**Symptoms**: Strategy runs but shows no price updates
+
+**Solutions**:
+- ✅ Check market hours (9:30 AM - 4:00 PM ET for US stocks)
+- ✅ Verify market data subscriptions in your IBKR account
+- ✅ Ensure the symbol exists and is tradeable (try QQQ first)
+
+#### 3. "Permission denied" or "Read-only API"
+
+**Symptoms**: Cannot place orders even in paper trading
+
+**Solutions**:
+- ✅ Uncheck "Read-Only API" in Gateway settings
+- ✅ Ensure paper trading mode is selected for safe testing
+- ✅ Restart IB Gateway after changing settings
+
+#### 4. Python Import Errors
+
+**Symptoms**: `ModuleNotFoundError` when running scripts
+
+**Solutions**:
 ```bash
-# Test backend endpoints
-cd backend
-python test_backend.py
+# Reinstall dependencies
+pip install --upgrade -r requirements.txt
+
+# Or install individually
+pip install ib-insync pandas numpy matplotlib
 ```
 
-## 🎯 Usage
+### Connection Testing
 
-### AI Chat Interface
+To test your IBKR connection independently:
 
-Ask the AI agent natural language questions:
+```python
+from ib_insync import IB
 
-- *"Show me day gainers"*
-- *"Find technology growth stocks"* 
-- *"What are the most active stocks today?"*
-- *"Undervalued large cap companies"*
-- *"Best stocks for London trading session"*
-
-### Manual Screening
-
-Use the screening controls to filter stocks by:
-- Day gainers/losers
-- Most active stocks
-- Technology growth
-- Undervalued large caps
-- Small cap gainers
-- And more...
-
-### Technical Analysis
-
-- View advanced charts with multiple indicators
-- Analyze price movements and patterns
-- Monitor volume and volatility
-- Track support and resistance levels
-
-## 📁 Project Structure
-
-```
-stock-stream-viz-99/
-├── backend/                    # Python backend
-│   ├── app.py                 # Main Flask application
-│   ├── stock_screener_tool.py # Yahoo Finance integration  
-│   ├── requirements.txt       # Python dependencies
-│   ├── start_server.py       # Startup script
-│   ├── test_backend.py       # Testing suite
-│   └── README.md             # Backend documentation
-├── src/                      # React frontend
-│   ├── components/           # UI components
-│   ├── services/            # API services
-│   ├── pages/              # Page components
-│   └── lib/                # Utilities
-├── public/                  # Static assets
-└── README.md               # This file
+ib = IB()
+try:
+    ib.connect('127.0.0.1', 4002, clientId=1)  # 4002 for paper trading
+    print("✅ Connected successfully!")
+    print(f"Account: {ib.managedAccounts()}")
+    ib.disconnect()
+except Exception as e:
+    print(f"❌ Connection failed: {e}")
 ```
 
-## 🔌 API Endpoints
+## ⚠️ Risk Warnings
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/health` | Health check and status |
-| POST | `/chat` | Chat with AI agent |
-| POST | `/screener` | Direct stock screening |
-| GET | `/screeners` | Available screen types |
+### Important Disclaimers
 
-## 🧪 Testing
+1. **Educational Purpose**: This strategy is for educational and research purposes
+2. **Past Performance**: Historical results don't guarantee future performance
+3. **Market Risk**: All trading involves risk of loss
+4. **Paper Trading First**: Always test with paper trading before using real money
+5. **Position Sizing**: Never risk more than you can afford to lose
 
-### Frontend Testing
-```bash
-npm run test
+### Best Practices
+
+- 🔒 Start with paper trading to understand the system
+- 📊 Monitor performance closely during live trading
+- 💰 Use appropriate position sizing (typically 1-2% risk per trade)
+- 🕐 Be aware of market hours and holidays
+- 📈 Regularly review and adjust parameters based on market conditions
+
+## 🔄 Advanced Usage
+
+### Custom Strategy Development
+
+You can create your own strategies by extending the `StrategyBase` class:
+
+```python
+from core.base import StrategyBase
+from core.registry import StrategyRegistry
+
+@StrategyRegistry.register("MyCustomStrategy")
+class MyCustomStrategy(StrategyBase):
+    async def on_bar(self, bar_data):
+        # Your custom trading logic here
+        pass
 ```
 
-### Backend Testing
-```bash
-cd backend
-python test_backend.py
+### Multi-Symbol Trading
+
+Run the strategy on multiple symbols:
+
+```python
+symbols = ['QQQ', 'SPY', 'IWM']
+for symbol in symbols:
+    # Create separate strategy instance for each symbol
+    params['symbol'] = symbol
+    strategy = IntradaySupertrendMA(f"Strategy_{symbol}", broker, params)
+    # Run strategy...
 ```
 
-### Manual Testing
-1. Start both frontend and backend
-2. Open http://localhost:5173
-3. Try the AI chat with various stock queries
-4. Test manual screening controls
-5. Verify real-time data updates
+## 📚 Complete Documentation
 
-## 🚀 Deployment
+This README provides an overview. For comprehensive documentation:
 
-### Frontend Deployment
-The frontend can be deployed to any static hosting service:
+**📋 [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) - Complete documentation index**
 
-```bash
-npm run build
-# Deploy the 'dist' folder
-```
-
-### Backend Deployment
-For production deployment:
-
-1. Update CORS settings in `app.py`
-2. Use a production WSGI server (gunicorn)
-3. Set up environment variables
-4. Configure Ollama on the server
-
-## 🔧 Configuration
-
-### Backend Configuration
-- Port: `5000` (configurable in `app.py`)
-- Model: `qwen` (configurable in `app.py`)
-- CORS: Enabled for all origins (development)
-
-### Frontend Configuration
-- Backend URL: `http://localhost:5000` (configurable in `src/services/pythonBackend.ts`)
-- Development port: `5173`
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-1. **Backend connection errors**:
-   - Ensure backend is running on port 5000
-   - Check if Ollama service is running
-   - Verify Qwen model is installed
-
-2. **Ollama issues**:
-   ```bash
-   ollama serve
-   ollama list  # Check installed models
-   ollama pull qwen  # Install if missing
-   ```
-
-3. **Port conflicts**:
-   - Change backend port in `app.py` 
-   - Update frontend config in `pythonBackend.ts`
-
-4. **Yahoo Finance API limits**:
-   - The app includes fallback demo data
-   - Check internet connection for real-time data
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License.
-
-## 🙏 Acknowledgments
-
-- **LangGraph** for AI agent orchestration
-- **Ollama** for local LLM hosting
-- **Yahoo Finance** for market data
-- **shadcn/ui** for beautiful components
-- **Qwen** AI model for intelligent responses
+### Quick Links:
+- 🚀 **[QUICK_START.md](QUICK_START.md)** - Get running in 15 minutes
+- 🏦 **[IBKR_SETUP_GUIDE.md](IBKR_SETUP_GUIDE.md)** - Detailed IBKR Gateway setup
+- ⚙️ **[CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md)** - Parameter configuration
+- 📊 **[USAGE_EXAMPLES.md](USAGE_EXAMPLES.md)** - Complete usage examples
+- ❓ **[FAQ.md](FAQ.md)** - Troubleshooting and common questions
+- 🔌 **[test_connection.py](test_connection.py)** - Test your IBKR connection
 
 ## 📞 Support
 
-If you encounter any issues:
+### Getting Help
 
-1. Check the troubleshooting section
-2. Review backend logs for errors
-3. Test with the provided test scripts
-4. Create an issue with detailed error information
+1. **Check [FAQ.md](FAQ.md)** for common solutions and troubleshooting
+2. **Run [test_connection.py](test_connection.py)** to diagnose connection issues
+3. **Review the [IBKR_SETUP_GUIDE.md](IBKR_SETUP_GUIDE.md)** for setup problems
+4. **Test with paper trading** first
+
+### System Requirements Check
+
+```python
+import sys
+print(f"Python version: {sys.version}")
+
+try:
+    import pandas as pd
+    import numpy as np
+    import ib_insync
+    import matplotlib
+    print("✅ All required packages are installed")
+except ImportError as e:
+    print(f"❌ Missing package: {e}")
+```
+
+## 📄 License
+
+This project is provided as-is for educational purposes. Use at your own risk.
 
 ---
 
-**Happy Stock Screening! 📈🤖**
+**Happy Trading! 📈**
+
+*Remember: The best strategy is the one you understand and can execute consistently.*
