@@ -1,0 +1,20 @@
+version: '3.9'
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.15.1-pg16
+    container_name: bactester-timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bactester
+      POSTGRES_USER: bactester
+      POSTGRES_PASSWORD: bactester
+      TIMESCALEDB_TELEMETRY: 'off'
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+
+volumes:
+  timescale-data:
+

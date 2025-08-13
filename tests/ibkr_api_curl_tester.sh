@@ -101,11 +101,11 @@ curl -s -X GET "$BASE_URL/api/v1/strategies/" | jq .
 header "10. List Running Strategies (Initial)"
 curl -s -X GET "$BASE_URL/api/v1/strategies/running" | jq .
 
-# 11. Start a Sample Strategy with MockBroker
-header "11. Start SampleStrategy with MockBroker"
+# 11. Start a Sample Strategy with IBKR Broker
+header "11. Start SampleStrategy with IBKR Broker"
 STRATEGY_PAYLOAD='{
   "name": "SampleStrategy",
-  "broker": "MockBroker",
+      "broker": "ibkr",
   "params": {
     "symbol": "TSLA",
     "fast_period": 5,

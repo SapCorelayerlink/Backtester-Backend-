@@ -11,7 +11,7 @@ class IBKRManager:
     def __init__(self):
         self.ib = IB()
 
-    async def connect(self, host='127.0.0.1', port=4002, clientId=None):
+    async def connect(self, host='127.0.0.1', port=4001, clientId=None):
         """Asynchronously connects to IBKR."""
         if self.ib.isConnected():
             print("Already connected to IBKR.")
@@ -20,7 +20,7 @@ class IBKRManager:
         if clientId is None:
             # Use a fixed client ID to ensure stable reconnections without creating competing sessions.
             # This allows the app to reclaim its session on auto-reload.
-            clientId = 199
+            clientId = 1
 
         try:
             print(f"Connecting to IBKR with clientId {clientId}...")

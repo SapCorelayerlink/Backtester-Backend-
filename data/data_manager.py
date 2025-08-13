@@ -1,12 +1,22 @@
 import pandas as pd
 import os
+from typing import List
 from sqlalchemy import create_engine, text, inspect
-from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy import table as sql_table, column as sql_column
 
 # --- Database Setup ---
 DB_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(DB_DIR, 'tradeflow.db')
+
+# Optional PostgreSQL/Timescale configuration via env vars
+PG_HOST = os.getenv('PG_HOST')
+PG_PORT = os.getenv('PG_PORT', '5432')
+PG_DB = os.getenv('PG_DB')
+PG_USER = os.getenv('PG_USER')
+PG_PASSWORD = os.getenv('PG_PASSWORD')
+PG_SSLMODE = os.getenv('PG_SSLMODE', 'prefer')
 
 class DataManager:
     """
@@ -23,10 +33,19 @@ class DataManager:
         try:
             with self.lock:
                 print("Lock acquired, initializing database...")
-                self.engine = create_engine(
-                    f'sqlite:///{self.db_path}',
-                    connect_args={'timeout': 15}
-                )
+                if PG_HOST and PG_DB and PG_USER:
+                    # PostgreSQL/Timescale engine
+                    pg_url = (
+                        f'postgresql+psycopg2://{PG_USER}:{PG_PASSWORD or ""}'
+                        f'@{PG_HOST}:{PG_PORT}/{PG_DB}?sslmode={PG_SSLMODE}'
+                    )
+                    self.engine = create_engine(pg_url)
+                else:
+                    # Fallback to SQLite local file
+                    self.engine = create_engine(
+                        f'sqlite:///{self.db_path}',
+                        connect_args={'timeout': 15}
+                    )
                 self._initialize_database()
         except TimeoutError as e:
             print(f"Could not acquire database lock: {e}")
@@ -46,27 +65,46 @@ class DataManager:
             inspector = inspect(self.engine)
             if not inspector.has_table('market_data'):
                 with self.engine.connect() as conn:
-                    conn.execute(text('''
-                        CREATE TABLE market_data (
-                            timestamp DATETIME NOT NULL,
-                            symbol TEXT NOT NULL,
-                            timeframe TEXT NOT NULL,
-                            open REAL NOT NULL,
-                            high REAL NOT NULL,
-                            low REAL NOT NULL,
-                            close REAL NOT NULL,
-                            volume INTEGER,
-                            PRIMARY KEY (timestamp, symbol, timeframe)
-                        )
-                    '''))
-                    conn.execute(text('''
-                        CREATE INDEX idx_symbol_timeframe
-                        ON market_data (symbol, timeframe)
-                    '''))
+                    if self.engine.url.get_backend_name().startswith('postgresql'):
+                        # Enable TimescaleDB extension and create hypertable
+                        conn.execute(text('CREATE EXTENSION IF NOT EXISTS timescaledb'))
+                        conn.execute(text('''
+                            CREATE TABLE market_data (
+                                timestamp TIMESTAMPTZ NOT NULL,
+                                symbol TEXT NOT NULL,
+                                timeframe TEXT NOT NULL,
+                                open DOUBLE PRECISION NOT NULL,
+                                high DOUBLE PRECISION NOT NULL,
+                                low DOUBLE PRECISION NOT NULL,
+                                close DOUBLE PRECISION NOT NULL,
+                                volume BIGINT,
+                                PRIMARY KEY (timestamp, symbol, timeframe)
+                            )
+                        '''))
+                        conn.execute(text('SELECT create_hypertable(''market_data'', ''timestamp'', if_not_exists => TRUE)'))
+                        conn.execute(text('CREATE INDEX IF NOT EXISTS idx_symbol_timeframe ON market_data (symbol, timeframe)'))
+                    else:
+                        conn.execute(text('''
+                            CREATE TABLE market_data (
+                                timestamp DATETIME NOT NULL,
+                                symbol TEXT NOT NULL,
+                                timeframe TEXT NOT NULL,
+                                open REAL NOT NULL,
+                                high REAL NOT NULL,
+                                low REAL NOT NULL,
+                                close REAL NOT NULL,
+                                volume INTEGER,
+                                PRIMARY KEY (timestamp, symbol, timeframe)
+                            )
+                        '''))
+                        conn.execute(text('''
+                            CREATE INDEX idx_symbol_timeframe
+                            ON market_data (symbol, timeframe)
+                        '''))
                     conn.commit()
-                print(f"Database table 'market_data' created successfully at {self.db_path}")
+                print("Database table 'market_data' created successfully")
             else:
-                print(f"Database already initialized at {self.db_path}")
+                print("Database already initialized")
         except Exception as e:
             print(f"Database initialization failed: {e}")
             raise
@@ -112,13 +150,17 @@ class DataManager:
         # ---> END FIX <---
         
         try:
-            df_copy.to_sql(
-                'market_data', 
-                self.engine, 
-                if_exists='append', 
-                index=False,
-                method=self._sqlite_upsert
-            )
+            if self.engine.url.get_backend_name().startswith('postgresql'):
+                # Use PostgreSQL upsert
+                self._pg_bulk_upsert('market_data', df_copy, conflict_cols=['timestamp','symbol','timeframe'])
+            else:
+                df_copy.to_sql(
+                    'market_data', 
+                    self.engine, 
+                    if_exists='append', 
+                    index=False,
+                    method=self._sqlite_upsert
+                )
             print(f"Successfully saved {len(df_copy)} base bars for {symbol}.")
         except Exception as e:
             print(f"Failed to save bars for {symbol}: {e}")
@@ -132,7 +174,7 @@ class DataManager:
         """
         sql_tbl = sql_table(table.name, *[sql_column(k) for k in keys])
         
-        stmt = insert(sql_tbl).values(list(data_iter))
+        stmt = sqlite_insert(sql_tbl).values(list(data_iter))
         
         # The pandas `table` object does not have a `primary_key` attribute.
         # We know the primary keys for our 'market_data' table, so we specify them directly.
@@ -147,6 +189,21 @@ class DataManager:
             set_=update_cols
         )
         conn.execute(upsert_stmt)
+
+    def _pg_bulk_upsert(self, table_name: str, df: pd.DataFrame, conflict_cols: List[str]):
+        """Efficient bulk upsert into PostgreSQL using native ON CONFLICT.
+        Requires SQLAlchemy connection and psycopg2 driver.
+        """
+        if df.empty:
+            return
+        cols = list(df.columns)
+        sql_tbl = sql_table(table_name, *[sql_column(c) for c in cols])
+        records = df.to_dict(orient='records')
+        stmt = pg_insert(sql_tbl).values(records)
+        update_cols = {c: stmt.excluded[c] for c in cols if c not in conflict_cols}
+        upsert_stmt = stmt.on_conflict_do_update(index_elements=conflict_cols, set_=update_cols)
+        with self.engine.begin() as conn:
+            conn.execute(upsert_stmt)
 
     def fetch_bars(self, symbol: str, timeframe: str, start_date: str, end_date: str) -> pd.DataFrame:
         """

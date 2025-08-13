@@ -8,7 +8,7 @@ START_DATE=$(date -v-1d '+%Y-%m-%d')
 END_DATE=$(date '+%Y-%m-%d')
 SYMBOL="AAPL"
 TIMEFRAME="1min"
-BROKER="ibkr" # or "mock"
+BROKER="ibkr" # Only IBKR supported
 
 echo "Requesting data for ${SYMBOL} (${TIMEFRAME}) from ${START_DATE} to ${END_DATE}..."
 echo ""

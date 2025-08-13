@@ -25,8 +25,19 @@ from data.data_manager import DataManager
 
 # --- Broker and Strategy Registration ---
 # Import the modules containing brokers and strategies to ensure they are registered.
-from brokers import ibkr_broker, mock_broker
-from strategies import macrossover_strategy, sample_strategy
+from brokers import ibkr_broker
+from strategies import (
+    macrossover_strategy, 
+    sample_strategy
+)
+# Import strategies with special characters in names
+# Note: These imports are commented out due to Python syntax restrictions
+# import strategies.RSI+VWAP
+# import strategies.Support Resiatance 
+# import strategies.Turtle
+# import strategies.Bollinger + 5EMA
+# import strategies.SwingFailure
+import strategies.Supertrend
 
 # --- Logging Setup ---
 log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -692,9 +703,9 @@ app.include_router(broker_router)
 app.include_router(data_router)
 
 # Ensure registration of sample broker and strategy
-import brokers.mock_broker
+    # Mock broker removed - only IBKR supported
 import strategies.sample_strategy
 import brokers.ibkr_broker
 # Import strategies for auto-discovery
 import strategies.macrossover_strategy
-import strategies.simple_trading_strategy 
+# import strategies.simple_trading_strategy  # Commented out - file doesn't exist 

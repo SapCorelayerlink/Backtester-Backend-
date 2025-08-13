@@ -1,4 +1,7 @@
 import sqlite3
+import os
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
 import json
 import os
 from datetime import datetime
@@ -14,11 +17,133 @@ class BacktestDatabase:
     def __init__(self, db_path: str = "data/backtest_database.db"):
         """Initialize the backtest database with all necessary tables."""
         self.db_path = db_path
+        self.engine: Engine | None = None
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        self._init_engine()
         self.init_database()
+
+    def _init_engine(self):
+        """Initialize optional PostgreSQL engine if env vars are set; otherwise None."""
+        pg_host = os.getenv('PG_HOST')
+        pg_db = os.getenv('PG_DB')
+        pg_user = os.getenv('PG_USER')
+        pg_password = os.getenv('PG_PASSWORD', '')
+        pg_port = os.getenv('PG_PORT', '5432')
+        pg_sslmode = os.getenv('PG_SSLMODE', 'prefer')
+        if pg_host and pg_db and pg_user:
+            url = f"postgresql+psycopg2://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}?sslmode={pg_sslmode}"
+            self.engine = create_engine(url)
     
     def init_database(self):
         """Create all necessary tables if they don't exist."""
+        if self.engine and self.engine.url.get_backend_name().startswith('postgresql'):
+            with self.engine.begin() as conn:
+                # Enable TimescaleDB and create schemas in Postgres
+                conn.execute(text('CREATE EXTENSION IF NOT EXISTS timescaledb'))
+                # backtest_runs
+                conn.execute(text('''
+                    CREATE TABLE IF NOT EXISTS backtest_runs (
+                        run_id TEXT PRIMARY KEY,
+                        strategy_name TEXT NOT NULL,
+                        symbol TEXT NOT NULL,
+                        timeframe TEXT NOT NULL,
+                        start_date TIMESTAMPTZ NOT NULL,
+                        end_date TIMESTAMPTZ NOT NULL,
+                        initial_capital DOUBLE PRECISION NOT NULL,
+                        final_equity DOUBLE PRECISION NOT NULL,
+                        total_return DOUBLE PRECISION NOT NULL,
+                        total_return_pct DOUBLE PRECISION NOT NULL,
+                        total_trades INTEGER NOT NULL,
+                        winning_trades INTEGER NOT NULL,
+                        losing_trades INTEGER NOT NULL,
+                        win_rate DOUBLE PRECISION NOT NULL,
+                        total_pnl DOUBLE PRECISION NOT NULL,
+                        average_trade_pnl DOUBLE PRECISION NOT NULL,
+                        sharpe_ratio DOUBLE PRECISION,
+                        max_drawdown DOUBLE PRECISION,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        parameters TEXT,
+                        status TEXT DEFAULT 'completed'
+                    )
+                '''))
+                # equity_curves as hypertable
+                conn.execute(text('''
+                    CREATE TABLE IF NOT EXISTS equity_curves (
+                        timestamp TIMESTAMPTZ NOT NULL,
+                        run_id TEXT NOT NULL,
+                        equity DOUBLE PRECISION NOT NULL,
+                        PRIMARY KEY (timestamp, run_id),
+                        FOREIGN KEY (run_id) REFERENCES backtest_runs(run_id) ON DELETE CASCADE
+                    )
+                '''))
+                conn.execute(text("SELECT create_hypertable('equity_curves','timestamp', if_not_exists => TRUE)"))
+                # trades
+                conn.execute(text('''
+                    CREATE TABLE IF NOT EXISTS trades (
+                        id SERIAL PRIMARY KEY,
+                        run_id TEXT NOT NULL,
+                        entry_time TIMESTAMPTZ NOT NULL,
+                        exit_time TIMESTAMPTZ NOT NULL,
+                        symbol TEXT NOT NULL,
+                        side TEXT NOT NULL,
+                        quantity DOUBLE PRECISION NOT NULL,
+                        entry_price DOUBLE PRECISION NOT NULL,
+                        exit_price DOUBLE PRECISION NOT NULL,
+                        pnl DOUBLE PRECISION NOT NULL,
+                        return_pct DOUBLE PRECISION NOT NULL,
+                        trade_duration_hours DOUBLE PRECISION,
+                        FOREIGN KEY (run_id) REFERENCES backtest_runs(run_id) ON DELETE CASCADE
+                    )
+                '''))
+                # strategies
+                conn.execute(text('''
+                    CREATE TABLE IF NOT EXISTS strategies (
+                        id SERIAL PRIMARY KEY,
+                        name TEXT UNIQUE NOT NULL,
+                        description TEXT,
+                        category TEXT,
+                        parameters_schema TEXT,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW(),
+                        is_active BOOLEAN DEFAULT TRUE
+                    )
+                '''))
+                # performance_metrics
+                conn.execute(text('''
+                    CREATE TABLE IF NOT EXISTS performance_metrics (
+                        id SERIAL PRIMARY KEY,
+                        run_id TEXT NOT NULL,
+                        metric_name TEXT NOT NULL,
+                        metric_value DOUBLE PRECISION NOT NULL,
+                        metric_type TEXT NOT NULL,
+                        calculated_at TIMESTAMPTZ DEFAULT NOW(),
+                        FOREIGN KEY (run_id) REFERENCES backtest_runs(run_id) ON DELETE CASCADE
+                    )
+                '''))
+                # market_data hypertable (if not already created by DataManager)
+                conn.execute(text('''
+                    CREATE TABLE IF NOT EXISTS market_data (
+                        timestamp TIMESTAMPTZ NOT NULL,
+                        symbol TEXT NOT NULL,
+                        timeframe TEXT NOT NULL,
+                        open DOUBLE PRECISION NOT NULL,
+                        high DOUBLE PRECISION NOT NULL,
+                        low DOUBLE PRECISION NOT NULL,
+                        close DOUBLE PRECISION NOT NULL,
+                        volume BIGINT,
+                        PRIMARY KEY (timestamp, symbol, timeframe)
+                    )
+                '''))
+                conn.execute(text("SELECT create_hypertable('market_data','timestamp', if_not_exists => TRUE)"))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS idx_market_data_symbol_timeframe ON market_data (symbol, timeframe)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS idx_equity_curves_run_id ON equity_curves(run_id)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS idx_trades_run_id ON trades(run_id)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS idx_performance_metrics_run_id ON performance_metrics(run_id)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS idx_backtest_runs_strategy ON backtest_runs(strategy_name)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS idx_backtest_runs_symbol ON backtest_runs(symbol)'))
+                return
+
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
