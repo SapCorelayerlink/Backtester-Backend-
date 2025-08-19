@@ -1,62 +1,20 @@
-2025-08-13 13:11:17,780 - ib_insync.client - INFO - Connecting to 127.0.0.1:4002 with clientId 199...
-2025-08-13 13:11:17,784 - ib_insync.client - INFO - Connected
-2025-08-13 13:11:37,790 - ib_insync.client - INFO - Disconnecting
-2025-08-13 13:11:37,791 - ib_insync.client - ERROR - API connection failed: TimeoutError()
-2025-08-13 13:11:37,792 - ib_insync.client - INFO - Disconnected.
-2025-08-13 13:11:38,826 - ib_insync.client - INFO - Connecting to 127.0.0.1:4002 with clientId 199...
-2025-08-13 13:11:38,829 - ib_insync.client - INFO - Connected
-2025-08-13 13:11:45,607 - ib_insync.client - INFO - Connecting to 127.0.0.1:4002 with clientId 199...
-2025-08-13 13:11:45,611 - ib_insync.client - INFO - Connected
-2025-08-13 13:11:58,841 - ib_insync.client - INFO - Disconnecting
-2025-08-13 13:11:58,841 - ib_insync.client - ERROR - API connection failed: TimeoutError()
-2025-08-13 13:11:58,843 - ib_insync.client - INFO - Disconnected.
-2025-08-13 13:12:05,615 - ib_insync.client - INFO - Disconnecting
-2025-08-13 13:12:05,615 - ib_insync.client - ERROR - API connection failed: TimeoutError()
-2025-08-13 13:12:05,617 - ib_insync.client - INFO - Disconnected.
-2025-08-13 13:12:12,484 - ib_insync.client - INFO - Connecting to 127.0.0.1:4002 with clientId 199...
-2025-08-13 13:12:12,488 - ib_insync.client - INFO - Connected
-2025-08-13 13:12:32,495 - ib_insync.client - INFO - Disconnecting
-2025-08-13 13:12:32,497 - ib_insync.client - ERROR - API connection failed: TimeoutError()
-2025-08-13 13:12:32,498 - ib_insync.client - INFO - Disconnected.
-2025-08-13 13:13:39,877 - ib_insync.client - INFO - Connecting to 127.0.0.1:4002 with clientId 199...
-2025-08-13 13:13:39,880 - ib_insync.client - INFO - Connected
-2025-08-13 13:13:59,887 - ib_insync.client - INFO - Disconnecting
-2025-08-13 13:13:59,888 - ib_insync.client - ERROR - API connection failed: TimeoutError()
-2025-08-13 13:13:59,890 - ib_insync.client - INFO - Disconnected.
-2025-08-13 13:14:12,041 - ib_insync.client - INFO - Connecting to 127.0.0.1:4002 with clientId 199...
-2025-08-13 13:14:12,044 - ib_insync.client - INFO - Connected
-2025-08-13 13:14:32,058 - ib_insync.client - INFO - Disconnecting
-2025-08-13 13:14:32,059 - ib_insync.client - ERROR - API connection failed: TimeoutError()
-2025-08-13 13:14:32,065 - ib_insync.client - INFO - Disconnected.
-2025-08-13 13:14:38,180 - ib_insync.client - INFO - Connecting to 127.0.0.1:4002 with clientId 199...
-2025-08-13 13:14:38,182 - ib_insync.client - INFO - Connected
-2025-08-13 13:14:58,190 - ib_insync.client - INFO - Disconnecting
-2025-08-13 13:14:58,192 - ib_insync.client - ERROR - API connection failed: TimeoutError()
-2025-08-13 13:14:58,194 - ib_insync.client - INFO - Disconnected.
-2025-08-13 13:15:05,849 - ib_insync.client - INFO - Connecting to 127.0.0.1:4002 with clientId 199...
-2025-08-13 13:15:05,851 - ib_insync.client - INFO - Connected
-2025-08-13 13:15:25,866 - ib_insync.client - INFO - Disconnecting
-2025-08-13 13:15:25,867 - ib_insync.client - ERROR - API connection failed: TimeoutError()
-2025-08-13 13:15:25,868 - ib_insync.client - INFO - Disconnected.
-2025-08-13 13:19:50,316 - ib_insync.client - INFO - Connecting to 127.0.0.1:4002 with clientId 199...
-2025-08-13 13:19:50,319 - ib_insync.client - INFO - Connected
-2025-08-13 13:20:10,333 - ib_insync.client - INFO - Disconnecting
-2025-08-13 13:20:10,334 - ib_insync.client - ERROR - API connection failed: TimeoutError()
-2025-08-13 13:20:10,336 - ib_insync.client - INFO - Disconnected.
-2025-08-13 13:20:17,445 - ib_insync.client - INFO - Connecting to 127.0.0.1:4002 with clientId 199...
-2025-08-13 13:20:17,449 - ib_insync.client - INFO - Connected
-2025-08-13 13:20:37,464 - ib_insync.client - INFO - Disconnecting
-2025-08-13 13:20:37,465 - ib_insync.client - ERROR - API connection failed: TimeoutError()
-2025-08-13 13:20:37,467 - ib_insync.client - INFO - Disconnected.
-2025-08-13 13:24:28,578 - ib_insync.client - INFO - Connecting to 127.0.0.1:4002 with clientId 199...
-2025-08-13 13:24:28,581 - ib_insync.client - INFO - Connected
-2025-08-13 13:24:48,592 - ib_insync.client - INFO - Disconnecting
-2025-08-13 13:24:48,593 - ib_insync.client - ERROR - API connection failed: TimeoutError()
-2025-08-13 13:24:48,608 - ib_insync.client - INFO - Disconnected.
-2025-08-13 13:47:07,421 - ib_insync.client - INFO - Connecting to 127.0.0.1:4002 with clientId 199...
-2025-08-13 13:47:07,431 - ib_insync.client - INFO - Connected
-2025-08-13 13:47:29,255 - ib_insync.client - INFO - Connecting to 127.0.0.1:4002 with clientId 199...
-2025-08-13 13:47:29,258 - ib_insync.client - INFO - Connected
-2025-08-13 13:47:49,269 - ib_insync.client - INFO - Disconnecting
-2025-08-13 13:47:49,270 - ib_insync.client - ERROR - API connection failed: TimeoutError()
-2025-08-13 13:47:49,271 - ib_insync.client - INFO - Disconnected.
+ 2025-08-18 18:11:00,479 - data.polygon_data - INFO - Retrieved 80 bars for SPY
+2025-08-18 18:11:00,491 - brokers.paper_broker - INFO - Successfully fetched 80 bars for SPY (4h)
+2025-08-18 18:11:02,208 - data.polygon_data - INFO - Retrieved 258 bars for SPY
+2025-08-18 18:11:02,220 - brokers.paper_broker - INFO - Successfully fetched 258 bars for SPY (4h)
+2025-08-18 18:11:02,574 - brokers.paper_executor - INFO - Placed market sell order for 100 SPY shares
+2025-08-18 18:11:02,574 - brokers.paper_broker - INFO - Placed paper order: {'order_id': 'PAPER_000001', 'status': 'pending', 'symbol': 'SPY', 'side': 'sell', 'quantity': 100, 'order_type': 'market'}
+2025-08-18 18:11:07,476 - brokers.paper_executor - INFO - Placed market buy order for 100 SPY shares
+2025-08-18 18:11:07,476 - brokers.paper_broker - INFO - Placed paper order: {'order_id': 'PAPER_000002', 'status': 'pending', 'symbol': 'SPY', 'side': 'buy', 'quantity': 100, 'order_type': 'market'}
+2025-08-18 18:11:07,630 - brokers.paper_executor - INFO - Placed market buy order for 100 SPY shares
+2025-08-18 18:11:07,631 - brokers.paper_broker - INFO - Placed paper order: {'order_id': 'PAPER_000003', 'status': 'pending', 'symbol': 'SPY', 'side': 'buy', 'quantity': 100, 'order_type': 'market'}
+2025-08-19 15:52:13,529 - brokers.paper_executor - INFO - Paper executor initialized with $100,000.00 starting cash
+2025-08-19 15:52:13,532 - brokers.paper_broker - INFO - Paper broker initialized with $100,000.00 starting cash
+2025-08-19 15:53:36,336 - data.polygon_data - INFO - Retrieved 2075 bars for AAPL
+2025-08-19 15:53:36,353 - brokers.paper_broker - INFO - Successfully fetched 2075 bars for AAPL (1min)
+2025-08-19 15:53:39,485 - data.polygon_data - INFO - Retrieved 249 bars for AAPL
+2025-08-19 15:53:39,488 - brokers.paper_broker - INFO - Successfully fetched 249 bars for AAPL (15)
+2025-08-19 15:56:14,713 - data.polygon_data - INFO - Retrieved 2409 bars for SPY
+2025-08-19 15:56:14,738 - brokers.paper_broker - INFO - Successfully fetched 2409 bars for SPY (1min)
+2025-08-19 15:56:19,219 - data.polygon_data - INFO - Retrieved 382 bars for SPY
+2025-08-19 15:56:19,224 - brokers.paper_broker - INFO - Successfully fetched 382 bars for SPY (3h)

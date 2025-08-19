@@ -69,7 +69,7 @@ def setup_api_key():
             else:
                 env_content = content + env_content
         else:
-            env_content = f"POLYGON_API_KEY={api_key}\n"
+            env_content = f"# Polygon API Configuration\nPOLYGON_API_KEY={api_key}\n\n# Paper Trading Configuration\nPAPER_MODE=True\nPAPER_STARTING_CASH=100000\n\n# Database Configuration (Optional - uncomment and configure if using PostgreSQL)\n# PG_HOST=localhost\n# PG_PORT=5432\n# PG_DB=bactester\n# PG_USER=postgres\n# PG_PASSWORD=your_password\n# PG_SSLMODE=prefer\n\n# WebSocket Configuration\nWEBSOCKET_HOST=localhost\nWEBSOCKET_PORT=8765\n\n# Trading Configuration\nDEFAULT_COMMISSION=0.0\nDEFAULT_SLIPPAGE=0.0\n\n# Logging Configuration\nLOG_LEVEL=INFO\nLOG_FILE=paper_trader.log\n"
         
         with open(env_file, 'w') as f:
             f.write(env_content)

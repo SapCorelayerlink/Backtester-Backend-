@@ -55,7 +55,41 @@ class RSIVWAPStrategy(StrategyBase):
         print(f"Overbought Short: {self.overbought_short}, {self.overbought2_short}")
         print(f"Stop Loss: {self.stop_loss_pct:.1%}, Take Profit: {self.take_profit_pct:.1%}")
         print(f"Timeframe: {self.timeframe} (4-hour bars)")
+        print(f"Symbol: {self.symbol}")
+        print(f"Quantity: {self.quantity}")
         print(f"{self.name}: Initialization complete.")
+        
+        # Pre-fetch some historical data to ensure we have enough for indicators
+        print(f"[{self.name}] Pre-fetching historical data for {self.symbol}...")
+        try:
+            from datetime import datetime, timedelta
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=30)  # Get 30 days of data
+            
+            data = await self.broker.get_historical_data(
+                symbol=self.symbol,
+                timeframe=self.timeframe,
+                start_date=start_date.strftime('%Y-%m-%d'),
+                end_date=end_date.strftime('%Y-%m-%d')
+            )
+            
+            if data is not None and not data.empty:
+                print(f"[{self.name}] Pre-fetched {len(data)} bars of historical data")
+                # Store the data for later use
+                self.price_data = []
+                for timestamp, row in data.iterrows():
+                    self.price_data.append({
+                        'timestamp': timestamp,
+                        'open': row.get('Open', row.get('open', 0)),
+                        'high': row.get('High', row.get('high', 0)),
+                        'low': row.get('Low', row.get('low', 0)),
+                        'close': row.get('Close', row.get('close', 0)),
+                        'volume': row.get('Volume', row.get('volume', 100))
+                    })
+            else:
+                print(f"[{self.name}] Warning: No historical data available for pre-fetch")
+        except Exception as e:
+            print(f"[{self.name}] Error pre-fetching data: {e}")
 
     def prepare_indicators(self, df):
         """Calculate VWAP and RSI indicators (preserving original logic)."""
@@ -80,17 +114,18 @@ class RSIVWAPStrategy(StrategyBase):
 
     async def on_bar(self, bar_data: pd.Series):
         """Process each new bar and execute trading logic (preserving original conditions)."""
-        # Extract bar data
-        current_price = bar_data['close']
-        current_time = bar_data['timestamp']
-        high = bar_data['high']
-        low = bar_data['low']
-        volume = bar_data.get('volume', 100)
+        # Extract bar data - handle both lowercase and uppercase column names
+        current_price = bar_data.get('close') or bar_data.get('Close')
+        current_time = bar_data.get('timestamp') or bar_data.get('Timestamp')
+        high = bar_data.get('high') or bar_data.get('High')
+        low = bar_data.get('low') or bar_data.get('Low')
+        open_price = bar_data.get('open') or bar_data.get('Open')
+        volume = bar_data.get('volume') or bar_data.get('Volume', 100)
         
         # Add to price data
         self.price_data.append({
             'timestamp': current_time,
-            'open': bar_data['open'],
+            'open': open_price,
             'high': high,
             'low': low,
             'close': current_price,
@@ -137,6 +172,7 @@ class RSIVWAPStrategy(StrategyBase):
             self.entry_price = current_price
             self.position_size = 1
             self.avg_price = self.entry_price
+            self.entry_time = current_time  # Store entry time for trade recording
             
             # Place order via IBKR
             try:
@@ -147,9 +183,9 @@ class RSIVWAPStrategy(StrategyBase):
                     'order_type': 'market'
                 }
                 await self.broker.place_order(order)
-                print(f"{current_time}: LONG ENTRY for {self.symbol} at {current_price:.2f} (RSI: {curr['rsi_vwap_long']:.1f})")
+                print(f"[{self.name}] {current_time}: LONG ENTRY for {self.symbol} at {current_price:.2f} (RSI: {curr['rsi_vwap_long']:.1f})")
             except Exception as e:
-                print(f"{self.name}: Failed to place LONG order: {e}")
+                print(f"[{self.name}] Failed to place LONG order: {e}")
 
         elif self.in_long and (stop_long or tp_long):
             # Exit entire long position
@@ -180,10 +216,10 @@ class RSIVWAPStrategy(StrategyBase):
                 
                 # Update equity
                 self.current_equity += pnl
-                print(f"{current_time}: LONG EXIT for {self.symbol} at {current_price:.2f}, PnL: {pnl:.2f}")
+                print(f"[{self.name}] {current_time}: LONG EXIT for {self.symbol} at {current_price:.2f}, PnL: {pnl:.2f}")
                 
             except Exception as e:
-                print(f"{self.name}: Failed to place LONG EXIT order: {e}")
+                print(f"[{self.name}] Failed to place LONG EXIT order: {e}")
             
             self.n_longs = 0
             self.entry_price = 0.0
@@ -196,6 +232,7 @@ class RSIVWAPStrategy(StrategyBase):
             self.entry_price = current_price
             self.position_size = 1
             self.avg_price = self.entry_price
+            self.entry_time = current_time  # Store entry time for trade recording
             
             # Place order via IBKR
             try:
@@ -206,9 +243,9 @@ class RSIVWAPStrategy(StrategyBase):
                     'order_type': 'market'
                 }
                 await self.broker.place_order(order)
-                print(f"{current_time}: SHORT ENTRY for {self.symbol} at {current_price:.2f} (RSI: {curr['rsi_vwap_short']:.1f})")
+                print(f"[{self.name}] {current_time}: SHORT ENTRY for {self.symbol} at {current_price:.2f} (RSI: {curr['rsi_vwap_short']:.1f})")
             except Exception as e:
-                print(f"{self.name}: Failed to place SHORT order: {e}")
+                print(f"[{self.name}] Failed to place SHORT order: {e}")
 
         elif self.in_short and (stop_short or tp_short):
             # Exit entire short position
@@ -239,10 +276,10 @@ class RSIVWAPStrategy(StrategyBase):
                 
                 # Update equity
                 self.current_equity += pnl
-                print(f"{current_time}: SHORT EXIT for {self.symbol} at {current_price:.2f}, PnL: {pnl:.2f}")
+                print(f"[{self.name}] {current_time}: SHORT EXIT for {self.symbol} at {current_price:.2f}, PnL: {pnl:.2f}")
                 
             except Exception as e:
-                print(f"{self.name}: Failed to place SHORT EXIT order: {e}")
+                print(f"[{self.name}] Failed to place SHORT EXIT order: {e}")
             
             self.n_shorts = 0
             self.entry_price = 0.0
@@ -338,3 +375,14 @@ class RSIVWAPStrategy(StrategyBase):
             df.at[idx, 'avg_price'] = avg_price
 
         return df
+
+    def get_results(self):
+        """Get strategy results."""
+        initial_equity = getattr(self, 'initial_equity', 0)
+        return {
+            'trades': getattr(self, 'trades', []),
+            'total_pnl': getattr(self, 'current_equity', 0) - initial_equity,
+            'total_trades': len(getattr(self, 'trades', [])),
+            'winning_trades': len([t for t in getattr(self, 'trades', []) if t.get('pnl', 0) > 0]),
+            'losing_trades': len([t for t in getattr(self, 'trades', []) if t.get('pnl', 0) < 0])
+        }

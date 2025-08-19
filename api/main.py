@@ -1,9 +1,18 @@
+import sys
+import os
+
+# Add the project root to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+
 import matplotlib
 matplotlib.use('Agg')
 import tracemalloc
 tracemalloc.start()
 
 from fastapi import FastAPI, APIRouter, HTTPException, Query, Depends, WebSocket, WebSocketDisconnect, Response, Request
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
@@ -20,24 +29,24 @@ import asyncio
 
 from core.registry import StrategyRegistry, BrokerRegistry
 from core.base import BrokerBase
-from brokers.ibkr_manager import ibkr_manager
 from data.data_manager import DataManager
 
 # --- Broker and Strategy Registration ---
 # Import the modules containing brokers and strategies to ensure they are registered.
-from brokers import ibkr_broker
-from strategies import (
-    macrossover_strategy, 
-    sample_strategy
-)
-# Import strategies with special characters in names
-# Note: These imports are commented out due to Python syntax restrictions
-# import strategies.RSI+VWAP
-# import strategies.Support Resiatance 
-# import strategies.Turtle
-# import strategies.Bollinger + 5EMA
-# import strategies.SwingFailure
+from brokers import paper_broker
+# Import available strategies
+import strategies.rsi_vwap_strategy
 import strategies.Supertrend
+import strategies.SwingFailure
+import strategies.Support_Resiatance
+import strategies.Bollinger_5EMA
+import strategies.Turtle
+import strategies.Pivot
+import strategies.Fibonnaci
+
+# Ensure strategies are registered
+print(f"Registered strategies: {StrategyRegistry.list()}")
+print(f"Registered brokers: {BrokerRegistry.list()}")
 
 # --- Logging Setup ---
 log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -58,26 +67,40 @@ async def lifespan(app: FastAPI):
     print("DataManager initialized.")
     
     print("Application starting up...")
-    try:
-        await ibkr_manager.connect()
-    except Exception as e:
-        print(f"Warning: IBKR connection failed: {e}")
-        print("Continuing without IBKR connection...")
     
     yield
     
     # Shutdown
     print("Application shutting down...")
-    try:
-        if hasattr(ibkr_manager, 'disconnect'):
-            ibkr_manager.disconnect()
-    except Exception as e:
-        print(f"Warning: Error during IBKR disconnect: {e}")
 
 app = FastAPI(
     title="TradeFlow AI: Algo Trading Platform",
     lifespan=lifespan
 )
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
+)
+
+# Custom exception handler to match Flutter error format
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.detail}
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"error": str(exc)}
+    )
 
 # In-memory store for running strategies and brokers
 running_strategies = {}
@@ -113,7 +136,7 @@ data_router = APIRouter(prefix="/api/v1/data", tags=["Data"])
 # -- API Response Models --
 class HealthStatus(BaseModel):
     status: str
-    ibkr_connected: bool
+    paper_broker_available: bool
 
 class StrategyList(BaseModel):
     strategies: List[str]
@@ -227,6 +250,12 @@ class BacktestResultsList(BaseModel):
     run_ids: List[str]
 
 # -- API Request Models --
+class FlutterOrderRequest(BaseModel):
+    symbol: str = Field(..., example="AAPL", description="The ticker symbol for the order.")
+    qty: float = Field(..., example=10, description="The quantity of shares to trade.")
+    side: str = Field(..., example="buy", description="The side of the order ('buy' or 'sell').")
+    type: str = Field(..., example="market", description="The order type ('market' or 'limit').")
+
 class OrderDetails(BaseModel):
     symbol: str = Field(..., example="AAPL", description="The ticker symbol for the order.")
     qty: float = Field(..., example=10, description="The quantity of shares to trade.")
@@ -243,110 +272,138 @@ class CancelOrderRequest(BaseModel):
     order_id: int
 
 # --- Data Endpoints ---
-@data_router.get("/{symbol}/{timeframe}", summary="Fetch historical and real-time data with smart backfilling")
+@data_router.get("/{symbol}/{timeframe}", summary="Fetch historical data from Polygon.io")
 async def get_smart_data(
     symbol: str,
-    timeframe: str, # e.g., "1min", "5min", "1day"
+    timeframe: str, # e.g., "1min", "5min", "1h", "1d"
     start_date: str, # YYYY-MM-DD
     end_date: str,   # YYYY-MM-DD
-    broker: BrokerBase = Depends(get_broker),
-    data_manager: DataManager = Depends(get_data_manager) # Use the new dependency
+    data_manager: DataManager = Depends(get_data_manager)
 ):
     """
-    This endpoint intelligently fetches data by first checking the local
-    database and then backfilling any missing data from the broker API.
+    This endpoint fetches historical data directly from Polygon.io.
     """
-    # 1. Fetch what we already have in the database
-    db_data = data_manager.fetch_bars(symbol, timeframe, start_date, end_date)
-    
-    start_dt = pd.to_datetime(start_date)
-    end_dt = pd.to_datetime(end_date)
-    
-    # 2. Analyze for gaps and backfill if necessary
-    if db_data.empty or db_data.index[-1] < end_dt:
-        # Determine the date from which to fetch new data
-        fetch_start_date = db_data.index[-1] + timedelta(seconds=1) if not db_data.empty else start_dt
+    try:
+        from data.polygon_data import PolygonDataProvider
+        from datetime import datetime
         
-        logging.info(f"Data gap found for {symbol}. Fetching from broker from {fetch_start_date} to {end_date}.")
+        # Create Polygon data provider
+        data_provider = PolygonDataProvider()
         
-        # Convert timeframe for IBKR API (e.g., '1min' -> '1 min')
-        ibkr_timeframe = timeframe.replace('min', ' min').replace('day', ' day')
+        # Convert dates to datetime objects
+        start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+        end_dt = datetime.strptime(end_date, '%Y-%m-%d')
         
-        try:
-            # Fetch the missing data from the broker
-            broker_data = await broker.get_historical_data(symbol, ibkr_timeframe, fetch_start_date.strftime('%Y-%m-%d'), end_date)
+        # Convert timeframe to Polygon format
+        timeframe_map = {
+            "1min": "1",
+            "5min": "5", 
+            "15min": "15",
+            "30min": "30",
+            "1h": "60",
+            "2h": "120",
+            "3h": "180",
+            "4h": "240",
+            "1d": "1D",
+            "1w": "1W",
+            "1m": "1M"
+        }
+        
+        interval = timeframe_map.get(timeframe.lower(), "1D")
+        
+        # Fetch data from Polygon
+        df = await data_provider.get_historical_bars(
+            symbol=symbol,
+            from_date=start_dt,
+            to_date=end_dt,
+            interval=interval
+        )
+        
+        if df is not None and not df.empty:
+            # Ensure proper column names
+            if 'date' in df.columns:
+                df.set_index('date', inplace=True)
+            elif 'timestamp' in df.columns:
+                df.set_index('timestamp', inplace=True)
             
-            if broker_data is not None and not broker_data.empty:
-                # ---> START FIX: Standardize broker data to match DB schema <---
-                
-                # 1. Rename 'date' column to 'timestamp' if it exists
-                if 'date' in broker_data.columns:
-                    broker_data.rename(columns={'date': 'timestamp'}, inplace=True)
-
-                # 2. Ensure timestamp is the index
-                if 'timestamp' in broker_data.columns:
-                    broker_data['timestamp'] = pd.to_datetime(broker_data['timestamp'])
-                    broker_data.set_index('timestamp', inplace=True)
-                elif not isinstance(broker_data.index, pd.DatetimeIndex):
-                     # If no timestamp column, assume index is what we need
-                    broker_data.index = pd.to_datetime(broker_data.index)
-                
-                # 3. Drop columns that don't exist in the DB
-                db_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-                cols_to_drop = [col for col in broker_data.columns if col not in db_columns and col.lower() not in [c.lower() for c in db_columns]]
-                broker_data.drop(columns=cols_to_drop, inplace=True, errors='ignore')
-
-                # 4. Ensure columns are capitalized before saving
-                broker_data.rename(columns={
-                    'open': 'Open', 'high': 'High', 'low': 'Low',
-                    'close': 'Close', 'volume': 'Volume'
-                }, inplace=True)
-                # ---> END FIX <---
-
-                # Save the newly fetched data to our database
-                # Ensure the base timeframe is used for saving
-                data_manager.save_bars(symbol, '1min', broker_data)
-                
-                # Resample the newly fetched data before combining if needed
-                if timeframe != '1min':
-                     agg_rules = {'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}
-                     broker_data = broker_data.resample(timeframe).agg(agg_rules).dropna()
-
-                # Combine the data
-                combined_data = pd.concat([db_data, broker_data])
-                # Remove any potential duplicates from the join
-                combined_data = combined_data[~combined_data.index.duplicated(keep='last')]
-                db_data = combined_data.sort_index()
-                
-        except Exception as e:
-            logging.error(f"Failed to backfill data from broker: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Failed to backfill data from broker: {e}")
-    
-    # 3. Final resampling to ensure the output matches the requested timeframe
-    if not db_data.empty and timeframe != '1min':
-        agg_rules = {'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}
-        db_data = db_data.resample(timeframe).agg(agg_rules).dropna()
-
-    # 4. Return the complete data as JSON
-    # It's better to reset the index to make the timestamp a regular column for JSON serialization
-    if not db_data.empty:
-        json_data = db_data.reset_index().to_dict(orient='records')
-        return json_data
+            # Standardize column names to match expected format
+            column_mapping = {
+                'open': 'open', 'high': 'high', 'low': 'low', 
+                'close': 'close', 'volume': 'volume'
+            }
+            df.rename(columns=column_mapping, inplace=True)
+            
+            # Return data in Flutter spec format
+            json_data = df.reset_index()
+        json_data.columns = [col.lower() if col != 'timestamp' else 'timestamp' for col in json_data.columns]
+        
+        return {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "data": json_data.to_dict(orient='records')
+        }
     else:
-        return []
+        return {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "data": []
+        }
+            
+    except Exception as e:
+        logging.error(f"Error fetching data for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch data: {str(e)}")
 
 # --- Broker Endpoints ---
-@broker_router.get("/{broker_name}/account-info", summary="Get account info from a broker", response_model=AccountInfo)
+@broker_router.get("/{broker_name}/account-info", summary="Get account info from a broker")
 async def get_account_info(broker_name: str, broker: BrokerBase = Depends(get_broker)):
     try:
-        return await broker.get_account_info()
+        account_data = await broker.get_account_info()
+        
+        # Transform to match Flutter spec
+        cash_balance = 0.0
+        equity = 0.0
+        buying_power = 0.0
+        
+        for item in account_data.get('account_summary', []):
+            if item.get('tag') == 'AvailableFunds':
+                cash_balance = float(item.get('value', 0))
+            elif item.get('tag') == 'NetLiquidation':
+                equity = float(item.get('value', 0))
+            elif item.get('tag') == 'BuyingPower':
+                buying_power = float(item.get('value', 0))
+        
+        return {
+            "account_id": "PAPER-123",
+            "cash_balance": cash_balance,
+            "equity": equity,
+            "buying_power": buying_power
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@broker_router.get("/{broker_name}/positions", summary="Get account positions from a broker", response_model=List[Position])
+@broker_router.get("/{broker_name}/positions", summary="Get account positions from a broker")
 async def get_positions(broker_name: str, broker: BrokerBase = Depends(get_broker)):
     try:
-        return await broker.get_positions()
+        positions_data = await broker.get_positions()
+        
+        # Transform to match Flutter spec
+        positions = []
+        for pos in positions_data:
+            # Get current market price (you might need to implement this)
+            market_price = pos.get('avg_cost', 0.0)  # Default to avg_cost for now
+            quantity = abs(pos.get('position', 0.0))
+            avg_price = pos.get('avg_cost', 0.0)
+            unrealized_pl = (market_price - avg_price) * quantity
+            
+            positions.append({
+                "symbol": pos.get('symbol', ''),
+                "quantity": quantity,
+                "avg_price": avg_price,
+                "market_price": market_price,
+                "unrealized_pl": unrealized_pl
+            })
+        
+        return positions
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -358,9 +415,33 @@ async def get_open_orders(broker_name: str, broker: BrokerBase = Depends(get_bro
         raise HTTPException(status_code=500, detail=str(e))
 
 @broker_router.post("/{broker_name}/order", summary="Place an order", response_model=Dict[str, Any])
-async def place_order(broker_name: str, req: PlaceOrderRequest, broker: BrokerBase = Depends(get_broker)):
+async def place_order(broker_name: str, req: FlutterOrderRequest, broker: BrokerBase = Depends(get_broker)):
     try:
-        return await broker.place_order(req.order.dict(), req.stop_loss, req.take_profit)
+        # Transform Flutter request to internal format
+        order_dict = {
+            "symbol": req.symbol,
+            "qty": req.qty,
+            "side": req.side,
+            "order_type": "MKT" if req.type == "market" else "LMT"
+        }
+        
+        result = await broker.place_order(order_dict)
+        
+        # Transform response to match Flutter spec
+        if "order_id" in result:
+            return {
+                "status": "filled" if result.get("status") == "Filled" else "submitted",
+                "symbol": req.symbol,
+                "qty": req.qty,
+                "filled_price": result.get("fill_price", 0.0)
+            }
+        else:
+            return {
+                "status": "error",
+                "symbol": req.symbol,
+                "qty": req.qty,
+                "filled_price": 0.0
+            }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -508,12 +589,28 @@ async def stop_strategy(req: StopStrategyRequest):
 def list_running_strategies():
     return {"running_strategies": list(running_strategies.keys())}
 
-@strategy_router.get("/available", summary="List available strategies", response_model=StrategyList)
+@strategy_router.get("/available", summary="List available strategies")
 def list_available_strategies():
     """List all available strategies that can be run."""
     from core.registry import StrategyRegistry
     strategies = StrategyRegistry.list()
-    return {"strategies": strategies}
+    
+    # Transform to match Flutter spec with descriptions and timeframes
+    strategy_descriptions = {
+        "IntradaySupertrendMA": "Intraday SuperTrend with Moving Averages (1min base, 30min MAs, 3h SuperTrend)",
+        "TurtleStrategy": "Turtle Trading System (1h timeframe)",
+        "BB5EMAStrategy": "Bollinger Bands with 5-period EMA (4h timeframe)",
+        "SRTrend4H": "Support and Resistance Trend Strategy (4h timeframe)",
+        "SwingFailureStrategy": "Swing Failure Pattern Strategy (1h timeframe)",
+        "RSIVWAPStrategy": "RSI with VWAP Strategy (4h timeframe)",
+        "PivotStrategy": "Pivot Point Strategy (15min timeframe)",
+        "FibonacciStrategy": "Fibonacci Retracement Strategy (4h timeframe)"
+    }
+    
+    return [
+        {"name": strategy, "description": strategy_descriptions.get(strategy, f"{strategy} trading strategy")}
+        for strategy in strategies
+    ]
 
 @strategy_router.get("/status/{strategy_name}", summary="Get strategy status", response_model=StrategyStatus)
 async def get_strategy_status(strategy_name: str):
@@ -532,7 +629,7 @@ async def get_strategy_status(strategy_name: str):
     else:
         return {"status": "not_found", "strategy": strategy_name, "message": "Strategy not found or not running"}
 
-@strategy_router.get("/results/{run_id}", summary="Get backtest results by run ID", response_model=BacktestResult)
+@strategy_router.get("/results/{run_id}", summary="Get backtest results by run ID")
 async def get_backtest_results(run_id: str):
     """
     Retrieve backtest results for a specific run ID from database.
@@ -555,29 +652,49 @@ async def get_backtest_results(run_id: str):
             with open(filepath, 'r') as f:
                 results = json.load(f)
         
-        # Add default values for missing fields to make it more robust
-        results.setdefault('start_time', None)
-        results.setdefault('end_time', None)
-        results.setdefault('equity_curve', [])
-        results.setdefault('trades', [])
-        results.setdefault('summary', {
-            'total_trades': 0,
-            'winning_trades': 0,
-            'losing_trades': 0,
-            'win_rate': 0.0,
-            'total_pnl': 0.0,
-            'average_trade_pnl': 0.0
-        })
-        results.setdefault('parameters', {})
+        # Transform to match Flutter spec
+        trades = []
+        for trade in results.get('trades', []):
+            trades.append({
+                "symbol": trade.get('symbol', ''),
+                "side": trade.get('side', ''),
+                "qty": trade.get('quantity', 0),
+                "price": trade.get('entry_price', 0.0),
+                "time": trade.get('entry_time', '')
+            })
         
-        return BacktestResult(**results)
+        # Transform equity curve to match Flutter spec
+        equity_curve = []
+        for point in results.get('equity_curve', []):
+            if isinstance(point, list) and len(point) >= 2:
+                equity_curve.append({
+                    "timestamp": point[0],
+                    "equity": float(point[1]) if isinstance(point[1], str) else point[1]
+                })
+        
+        return {
+            "run_id": results.get('run_id', run_id),
+            "strategy": results.get('strategy_name', ''),
+            "status": "completed",
+            "start_date": results.get('start_time', '').split('T')[0] if results.get('start_time') else '',
+            "end_date": results.get('end_time', '').split('T')[0] if results.get('end_time') else '',
+            "initial_capital": results.get('initial_capital', 0.0),
+            "final_capital": results.get('final_equity', 0.0),
+            "total_trades": results.get('summary', {}).get('total_trades', 0),
+            "trades": trades,
+            "equity_curve": equity_curve,
+            "pnl": {
+                "total": results.get('total_return', 0.0),
+                "percentage": results.get('total_return_pct', 0.0)
+            }
+        }
     
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"Invalid JSON format in results file: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error loading backtest results: {str(e)}")
 
-@strategy_router.get("/results", summary="List available backtest results", response_model=BacktestResultsList)
+@strategy_router.get("/results", summary="List available backtest results")
 async def list_backtest_results():
     """
     List all available backtest result run IDs from database.
@@ -594,7 +711,7 @@ async def list_backtest_results():
             results_dir = "backtest_results"
             
             if not os.path.exists(results_dir):
-                return BacktestResultsList(run_ids=[])
+                return []
             
             # Get all JSON files in the results directory
             for filename in os.listdir(results_dir):
@@ -605,7 +722,27 @@ async def list_backtest_results():
             # Sort by creation time (newest first)
             run_ids.sort(key=lambda x: os.path.getctime(os.path.join(results_dir, f"{x}.json")), reverse=True)
         
-        return BacktestResultsList(run_ids=run_ids)
+        # Transform to match Flutter spec
+        results = []
+        for run_id in run_ids:
+            # Try to get strategy name from database or filename
+            strategy_name = "Unknown"
+            try:
+                result_data = db.get_backtest_result(run_id)
+                if result_data:
+                    strategy_name = result_data.get('strategy_name', 'Unknown')
+            except:
+                # Extract strategy name from run_id if possible
+                if '_' in run_id:
+                    strategy_name = run_id.split('_')[0]
+            
+            results.append({
+                "run_id": run_id,
+                "strategy": strategy_name,
+                "status": "completed"
+            })
+        
+        return results
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error listing backtest results: {str(e)}")
@@ -690,11 +827,10 @@ async def get_backtest_report():
 async def read_root():
     return {"message": "Welcome to TradeFlow AI", "docs": "/docs"}
 
-@app.get("/health", summary="Health check", response_model=HealthStatus)
+@app.get("/health", summary="Health check")
 async def health_check():
     return {
-        "status": "ok",
-        "ibkr_connected": ibkr_manager.is_connected()
+        "status": "ok"
     }
 
 # --- Include Routers ---
@@ -702,10 +838,10 @@ app.include_router(strategy_router)
 app.include_router(broker_router)
 app.include_router(data_router)
 
-# Ensure registration of sample broker and strategy
-    # Mock broker removed - only IBKR supported
-import strategies.sample_strategy
-import brokers.ibkr_broker
-# Import strategies for auto-discovery
-import strategies.macrossover_strategy
-# import strategies.simple_trading_strategy  # Commented out - file doesn't exist 
+# Ensure registration of broker
+import brokers.paper_broker
+
+# --- Server Startup ---
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000) 

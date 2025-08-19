@@ -111,11 +111,15 @@ class DataManager:
 
     def save_bars(self, symbol: str, timeframe: str, bars_df: pd.DataFrame):
         """
-        Saves a DataFrame of bar data to the database using an UPSERT strategy.
-        Now primarily intended for saving high-resolution (1-min) data.
+        Saves OHLCV bars to the database with upsert logic.
+        Expects a DataFrame with DatetimeIndex and OHLCV columns.
         """
         if self.engine is None:
             print("Database engine not initialized. Cannot save bars.")
+            return
+
+        if bars_df.empty:
+            print(f"No data to save for {symbol}.")
             return
 
         if not isinstance(bars_df.index, pd.DatetimeIndex):
@@ -128,7 +132,14 @@ class DataManager:
         # 1. Reset index to make 'timestamp' a column to work with
         df_copy.reset_index(inplace=True)
         
-        # 2. Define the exact columns of the database table
+        # 2. Ensure timestamp is properly formatted and timezone-naive
+        if 'timestamp' in df_copy.columns:
+            df_copy['timestamp'] = pd.to_datetime(df_copy['timestamp'])
+            # Convert to timezone-naive if it has timezone info
+            if df_copy['timestamp'].dt.tz is not None:
+                df_copy['timestamp'] = df_copy['timestamp'].dt.tz_localize(None)
+        
+        # 3. Define the exact columns of the database table
         db_schema = {
             'timestamp': 'timestamp', 'date': 'timestamp', # Allow 'date' as an alias for 'timestamp'
             'open': 'open', 'Open': 'open',
@@ -139,14 +150,23 @@ class DataManager:
         }
         df_copy.rename(columns=db_schema, inplace=True)
 
-        # 3. Add symbol and timeframe
+        # 4. Add symbol and timeframe
         df_copy['symbol'] = symbol
-        df_copy['timeframe'] = '1min' # Always save as base timeframe
+        df_copy['timeframe'] = timeframe
 
-        # 4. Keep only the columns that exist in the database and are required.
+        # 5. Keep only the columns that exist in the database and are required.
         final_columns = ['timestamp', 'symbol', 'timeframe', 'open', 'high', 'low', 'close', 'volume']
         cols_to_keep = [col for col in final_columns if col in df_copy.columns]
         df_copy = df_copy[cols_to_keep]
+        
+        # 6. Ensure no NULL values in timestamp column
+        if df_copy['timestamp'].isnull().any():
+            print(f"Warning: Found NULL timestamps in data for {symbol}, removing those rows")
+            df_copy = df_copy.dropna(subset=['timestamp'])
+        
+        if df_copy.empty:
+            print(f"No valid data to save for {symbol} after cleaning.")
+            return
         # ---> END FIX <---
         
         try:
@@ -161,7 +181,7 @@ class DataManager:
                     index=False,
                     method=self._sqlite_upsert
                 )
-            print(f"Successfully saved {len(df_copy)} base bars for {symbol}.")
+            print(f"Successfully saved {len(df_copy)} bars for {symbol} ({timeframe}).")
         except Exception as e:
             print(f"Failed to save bars for {symbol}: {e}")
             raise

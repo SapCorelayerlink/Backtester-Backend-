@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import List, Callable, Optional, Dict, Any
 import pandas as pd
@@ -25,6 +26,8 @@ class PolygonDataProvider:
         self.ws_client = None
         self.is_connected = False
         self.price_callbacks = []
+        self.last_request_time = 0
+        self.min_request_interval = 0.1  # 100ms between requests to avoid rate limits
         
     async def get_historical_bars(
         self, 
@@ -46,6 +49,12 @@ class PolygonDataProvider:
             DataFrame with OHLCV data
         """
         try:
+            # Rate limiting - ensure minimum time between requests
+            current_time = time.time()
+            time_since_last = current_time - self.last_request_time
+            if time_since_last < self.min_request_interval:
+                await asyncio.sleep(self.min_request_interval - time_since_last)
+            
             # Convert interval to Polygon format
             if interval == "1D":
                 multiplier = 1
@@ -60,15 +69,27 @@ class PolygonDataProvider:
                 multiplier = int(interval)
                 timespan = "minute"
             
-            # Get historical data
-            bars = self.rest_client.get_aggs(
-                ticker=symbol,
-                multiplier=multiplier,
-                timespan=timespan,
-                from_=from_date.strftime('%Y-%m-%d'),
-                to=to_date.strftime('%Y-%m-%d'),
-                limit=50000
-            )
+            # Get historical data with retry logic
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    bars = self.rest_client.get_aggs(
+                        ticker=symbol,
+                        multiplier=multiplier,
+                        timespan=timespan,
+                        from_=from_date.strftime('%Y-%m-%d'),
+                        to=to_date.strftime('%Y-%m-%d'),
+                        limit=50000
+                    )
+                    self.last_request_time = time.time()
+                    break
+                except Exception as e:
+                    if "429" in str(e) and attempt < max_retries - 1:
+                        logger.warning(f"Rate limit hit for {symbol}, retrying in {2 ** attempt} seconds...")
+                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                        continue
+                    else:
+                        raise e
             
             if not bars:
                 logger.warning(f"No historical data found for {symbol}")

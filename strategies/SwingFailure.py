@@ -21,7 +21,7 @@ class SwingFailureStrategy(StrategyBase):
         
         # Trading parameters
         self.symbol = self.params.get('symbol', 'AAPL')
-        self.timeframe = self.params.get('timeframe', '4h')  # 4-hour bars
+        self.timeframe = self.params.get('timeframe', '1h')  # 1-hour bars
         self.quantity = self.params.get('quantity', 100)
         
         # State variables
@@ -37,15 +37,21 @@ class SwingFailureStrategy(StrategyBase):
         print(f"Initializing {self.name} Swing Failure strategy")
         print(f"Parameters: Swing Period({self.swing_period}), Max Swing Back({self.max_swing_back})")
         print(f"Back to Break: {self.back_to_break}, SFP Type: {self.sfp_type}")
-        print(f"Symbol: {self.symbol}, Timeframe: {self.timeframe} (4-hour bars)")
+        print(f"Symbol: {self.symbol}, Timeframe: {self.timeframe} (1-hour bars)")
         print(f"{self.name}: Initialization complete.")
 
     def detect_sfp(self, df):
         """
-        Detect Swing Failure Patterns on 4H OHLC data (preserving original logic).
+        Detect Swing Failure Patterns on 1H OHLC data (preserving original logic).
         Returns a DataFrame with boolean flags 'sfp_high' and 'sfp_low'.
         """
         df = df.copy()
+        
+        # Handle column name mapping - check for uppercase and create lowercase versions
+        for lower_col, upper_col in [('high', 'High'), ('low', 'Low'), ('close', 'Close'), 
+                                   ('volume', 'Volume'), ('timestamp', 'Timestamp')]:
+            if upper_col in df.columns and lower_col not in df.columns:
+                df[lower_col] = df[upper_col]
         
         # Identify pivot highs/lows
         df['pivot_high'] = (
@@ -85,7 +91,7 @@ class SwingFailureStrategy(StrategyBase):
 
             # Check high-SFP: price retraces into pivot high then closes below its low end
             for pivot_idx, price in reversed(piv_h):
-                bars_since = (idx - pivot_idx) / pd.Timedelta('4H')
+                bars_since = (idx - pivot_idx) / pd.Timedelta('1H')
                 if bars_since <= self.back_to_break:
                     # Real SFP: high pivot > current high > current close
                     cond_real = (price > row['high'] > row['close'])
@@ -101,7 +107,7 @@ class SwingFailureStrategy(StrategyBase):
 
             # Check low-SFP similarly
             for pivot_idx, price in reversed(piv_l):
-                bars_since = (idx - pivot_idx) / pd.Timedelta('4H')
+                bars_since = (idx - pivot_idx) / pd.Timedelta('1H')
                 if bars_since <= self.back_to_break:
                     cond_real = (price < row['low'] < row['close'])
                     cond_cons = (row['close'] > df['close'].shift(1).iat[i]
@@ -117,20 +123,20 @@ class SwingFailureStrategy(StrategyBase):
 
     async def on_bar(self, bar_data: pd.Series):
         """Process each new bar and execute trading logic (preserving original conditions)."""
-        # Extract bar data
-        current_price = bar_data['close']
-        current_time = bar_data['timestamp']
-        high = bar_data['high']
-        low = bar_data['low']
+        # Extract bar data - handle both lowercase and uppercase column names
+        current_price = bar_data.get('close') or bar_data.get('Close')
+        current_time = bar_data.get('timestamp') or bar_data.get('Timestamp')
+        high = bar_data.get('high') or bar_data.get('High')
+        low = bar_data.get('low') or bar_data.get('Low')
         
         # Add to price data
         self.price_data.append({
             'timestamp': current_time,
-            'open': bar_data['open'],
+            'open': bar_data.get('open') or bar_data.get('Open'),
             'high': high,
             'low': low,
             'close': current_price,
-            'volume': bar_data.get('volume', 100)
+            'volume': bar_data.get('volume') or bar_data.get('Volume', 100)
         })
         
         # Need enough data for indicators (at least swing_period + 10 bars)
@@ -312,7 +318,7 @@ class SwingFailureStrategy(StrategyBase):
 
             # Check high-SFP: price retraces into pivot high then closes below its low end
             for pivot_idx, price in reversed(piv_h):
-                bars_since = (idx - pivot_idx) / pd.Timedelta('4H')
+                bars_since = (idx - pivot_idx) / pd.Timedelta('1H')
                 if bars_since <= back_to_break:
                     # Real SFP: high pivot > current high > current close
                     cond_real = (price > row['High'] > row['Close'])
@@ -328,7 +334,7 @@ class SwingFailureStrategy(StrategyBase):
 
             # Check low-SFP similarly
             for pivot_idx, price in reversed(piv_l):
-                bars_since = (idx - pivot_idx) / pd.Timedelta('4H')
+                bars_since = (idx - pivot_idx) / pd.Timedelta('1H')
                 if bars_since <= back_to_break:
                     cond_real = (price < row['Low'] < row['Close'])
                     cond_cons = (row['Close'] > df['Close'].shift(1).iat[i]
@@ -349,7 +355,7 @@ def detect_sfp(df,
                back_to_break=4,
                sfp_type='Real SFP'):
     """
-    Detect Swing Failure Patterns on 4H OHLC data (legacy function).
+    Detect Swing Failure Patterns on 1H OHLC data (legacy function).
     
     Returns a DataFrame with boolean flags 'SFP_High' and 'SFP_Low'.
     """
@@ -365,3 +371,14 @@ def detect_sfp(df,
     )
     
     return strategy.detect_sfp_legacy(df, swing_period, max_swing_back, back_to_break, sfp_type)
+
+    def get_results(self):
+        """Get strategy results."""
+        initial_equity = getattr(self, 'initial_equity', 0)
+        return {
+            'trades': getattr(self, 'trades', []),
+            'total_pnl': getattr(self, 'current_equity', 0) - initial_equity,
+            'total_trades': len(getattr(self, 'trades', [])),
+            'winning_trades': len([t for t in getattr(self, 'trades', []) if t.get('pnl', 0) > 0]),
+            'losing_trades': len([t for t in getattr(self, 'trades', []) if t.get('pnl', 0) < 0])
+        }
