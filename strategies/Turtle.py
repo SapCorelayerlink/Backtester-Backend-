@@ -69,6 +69,12 @@ class TurtleStrategy(StrategyBase):
 
     def calculate_indicators(self, df):
         """Calculate required technical indicators (preserving original logic)."""
+        # Handle column name mapping - check for uppercase and create lowercase versions
+        for lower_col, upper_col in [('high', 'High'), ('low', 'Low'), ('close', 'Close'), 
+                                   ('volume', 'Volume'), ('timestamp', 'Timestamp')]:
+            if upper_col in df.columns and lower_col not in df.columns:
+                df[lower_col] = df[upper_col]
+        
         # Calculate ATR for 1-hour timeframe
         df['atr'] = ta.volatility.AverageTrueRange(
             high=df['high'], 
@@ -87,20 +93,20 @@ class TurtleStrategy(StrategyBase):
 
     async def on_bar(self, bar_data: pd.Series):
         """Process each new bar and execute trading logic (preserving original conditions)."""
-        # Extract bar data
-        current_price = bar_data['close']
-        current_time = bar_data['timestamp']
-        high = bar_data['high']
-        low = bar_data['low']
+        # Extract bar data - handle both lowercase and uppercase column names
+        current_price = bar_data.get('close') or bar_data.get('Close')
+        current_time = bar_data.get('timestamp') or bar_data.get('Timestamp')
+        high = bar_data.get('high') or bar_data.get('High')
+        low = bar_data.get('low') or bar_data.get('Low')
         
         # Add to price data
         self.price_data.append({
             'timestamp': current_time,
-            'open': bar_data['open'],
+            'open': bar_data.get('open') or bar_data.get('Open'),
             'high': high,
             'low': low,
             'close': current_price,
-            'volume': bar_data.get('volume', 100)
+            'volume': bar_data.get('volume') or bar_data.get('Volume', 100)
         })
         
         # Need enough data for indicators
@@ -446,6 +452,17 @@ class TurtleStrategy(StrategyBase):
         df['cumulative_returns'] = (1 + df['strategy_returns']).cumprod()
         
         return df
+
+    def get_results(self):
+        """Get strategy results."""
+        initial_equity = getattr(self, 'initial_equity', 0)
+        return {
+            'trades': getattr(self, 'trades', []),
+            'total_pnl': getattr(self, 'current_equity', 0) - initial_equity,
+            'total_trades': len(getattr(self, 'trades', [])),
+            'winning_trades': len([t for t in getattr(self, 'trades', []) if t.get('pnl', 0) > 0]),
+            'losing_trades': len([t for t in getattr(self, 'trades', []) if t.get('pnl', 0) < 0])
+        }
 
 # Legacy function for backward compatibility
 def run_turtle_strategy(ohlcv_data):

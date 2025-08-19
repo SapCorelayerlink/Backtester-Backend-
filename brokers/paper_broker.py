@@ -1,7 +1,7 @@
 from core.base import BrokerBase
 from core.registry import BrokerRegistry
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import pandas as pd
 from .paper_executor import PaperExecutor
@@ -215,11 +215,90 @@ class PaperBroker(BrokerBase):
     async def get_historical_data(self, symbol: str, timeframe: str, start_date: str, end_date: str) -> pd.DataFrame:
         """
         Get historical OHLCV market data for a specific symbol and timeframe.
-        This method is required by the BrokerBase interface.
+        This method uses the Polygon data provider to fetch real historical data.
         """
-        # In paper trading, this would typically come from the data provider
-        # For now, return empty DataFrame
-        import pandas as pd
+        import asyncio
+        max_retries = 3
+        retry_delay = 2  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                from data.polygon_data import PolygonDataProvider
+                from datetime import datetime
+                
+                # Create data provider instance
+                data_provider = PolygonDataProvider()
+                
+                # Convert dates to datetime objects
+                start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+                end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+                
+                # Convert timeframe to Polygon format
+                # Polygon uses minutes for intraday data
+                timeframe_map = {
+                    "1min": "1",
+                    "5min": "5", 
+                    "15min": "15",
+                    "30min": "30",
+                    "1h": "60",
+                    "2h": "120",
+                    "3h": "180",
+                    "4h": "240",
+                    "1d": "1D",
+                    "1w": "1W",
+                    "1m": "1M"
+                }
+                
+                interval = timeframe_map.get(timeframe.lower(), "1D")
+                
+                # For rate limiting issues, try with a smaller date range if needed
+                if attempt > 0:
+                    # Reduce the date range for retry attempts
+                    days_reduction = attempt * 7  # Reduce by 7 days each retry
+                    start_dt = start_dt + timedelta(days=days_reduction)
+                    logger.warning(f"Retry {attempt + 1}: Reduced date range to {start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}")
+                
+                # Fetch historical data from Polygon
+                df = await data_provider.get_historical_bars(
+                    symbol=symbol,
+                    from_date=start_dt,
+                    to_date=end_dt,
+                    interval=interval
+                )
+                
+                if df is not None and not df.empty:
+                    # Ensure proper column names
+                    if 'date' in df.columns:
+                        df.set_index('date', inplace=True)
+                    elif 'timestamp' in df.columns:
+                        df.set_index('timestamp', inplace=True)
+                    
+                    # Standardize column names to match expected format
+                    column_mapping = {
+                        'open': 'Open', 'high': 'High', 'low': 'Low', 
+                        'close': 'Close', 'volume': 'Volume'
+                    }
+                    df.rename(columns=column_mapping, inplace=True)
+                    
+                    logger.info(f"Successfully fetched {len(df)} bars for {symbol} ({timeframe})")
+                    return df
+                else:
+                    logger.warning(f"No historical data returned for {symbol} ({timeframe})")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delay)
+                        continue
+                    return pd.DataFrame()
+                    
+            except Exception as e:
+                logger.error(f"Error fetching historical data for {symbol} (attempt {attempt + 1}): {e}")
+                if attempt < max_retries - 1:
+                    logger.info(f"Retrying in {retry_delay} seconds...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    logger.error(f"Failed to fetch data for {symbol} after {max_retries} attempts")
+                    return pd.DataFrame()
+        
         return pd.DataFrame()
     
     async def stream_market_data(self, symbol: str, on_data: callable, asset_type: str = "stock"):
@@ -255,3 +334,29 @@ class PaperBroker(BrokerBase):
         """
         logger.info(f"Unsubscribed from market data for {symbol}")
         return True
+    
+    async def get_open_orders(self) -> list[Dict[str, Any]]:
+        """Get open orders from paper broker."""
+        if not self.is_connected:
+            raise Exception("Broker not connected")
+        
+        try:
+            return self.executor.get_open_orders()
+        except Exception as e:
+            logger.error(f"Error getting open orders: {e}")
+            return []
+    
+    async def cancel_all_orders(self) -> Dict[str, Any]:
+        """Cancel all open orders."""
+        if not self.is_connected:
+            raise Exception("Broker not connected")
+        
+        try:
+            cancelled_count = self.executor.cancel_all_orders()
+            return {
+                "message": f"Cancelled {cancelled_count} orders",
+                "cancelled_count": cancelled_count
+            }
+        except Exception as e:
+            logger.error(f"Error cancelling all orders: {e}")
+            raise Exception(f"Failed to cancel all orders: {e}")

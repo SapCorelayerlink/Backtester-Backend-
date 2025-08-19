@@ -181,9 +181,9 @@ def show_menu():
         elif choice == '5':
             test_system()
         elif choice == '6':
-            run_strategy_test('test_rsi_vwap_simple.py')
+            run_strategy_test('test_scripts\\test_rsi_vwap_simple.py')
         elif choice == '7':
-            run_strategy_test('test_turtle_strategy.py')
+            run_strategy_test('test_scripts\\test_turtle_strategy.py')
         elif choice == '8':
             run_database_viewer()
         elif choice == '9':
@@ -224,9 +224,9 @@ def run_complete_setup():
     
     print("\n🎉 Complete setup finished successfully!")
     print("You can now:")
-    print("  - Run strategies: python test_rsi_vwap_simple.py")
+    print("  - Run strategies: python test_scripts\\test_rsi_vwap_simple.py")
     print("  - Start API server: python -m api.main")
-    print("  - View database: python view_database_data.py")
+    print("  - View database: python utility_scripts\\view_database_data.py")
 
 def run_strategy_test(script_name):
     """Run a strategy test script"""
@@ -251,7 +251,7 @@ def run_database_viewer():
     print("\n📊 Starting database viewer...")
     
     try:
-        subprocess.run([sys.executable, 'view_database_data.py'])
+        subprocess.run([sys.executable, 'utility_scripts\\view_database_data.py'])
     except Exception as e:
         print(f"❌ Error running database viewer: {e}")
 

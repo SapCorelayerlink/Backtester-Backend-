@@ -30,7 +30,7 @@ echo ✅ Running from correct directory
 echo.
 
 REM Run the quick start script
-python quick_start.py
+python setup_guide\quick_start.py
 
 echo.
 echo ======================================================================

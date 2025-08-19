@@ -2,7 +2,7 @@ import os
 from typing import Dict, Any
 
 # Polygon.io Configuration
-POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "YOUR_API_KEY")
+POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "EuDdzXAGRUOBnAPs4e_efsvNQOhYFtzX")
 POLYGON_BASE_URL = "https://api.polygon.io"
 
 # Paper Trading Configuration

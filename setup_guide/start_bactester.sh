@@ -35,10 +35,10 @@ echo -e "${GREEN}✅ Running from correct directory${NC}"
 echo
 
 # Make the script executable
-chmod +x quick_start.py
+chmod +x setup_guide/quick_start.py
 
 # Run the quick start script
-python3 quick_start.py
+python3 setup_guide/quick_start.py
 
 echo
 echo -e "${BLUE}======================================================================"

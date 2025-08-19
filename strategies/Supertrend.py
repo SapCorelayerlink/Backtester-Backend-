@@ -157,8 +157,13 @@ class IntradaySupertrendMA(StrategyBase):
     def is_market_open(self, current_time: datetime) -> bool:
         if current_time is None:
             return False
-        ct = current_time.time()
-        return self.trading_hours['start'] <= ct <= self.trading_hours['end']
+        try:
+            ct = current_time.time()
+            return self.trading_hours['start'] <= ct <= self.trading_hours['end']
+        except Exception as e:
+            # If time conversion fails, assume market is open
+            print(f"[{self.name}] Warning: time conversion failed in is_market_open: {e}")
+            return True
 
     def _resample(self) -> Dict[str, pd.DataFrame]:
         if self.minute_bars.empty:
@@ -176,8 +181,12 @@ class IntradaySupertrendMA(StrategyBase):
         Expects a 1-minute bar with keys: timestamp, open, high, low, close, volume.
         Stores it, resamples, and on each completed 30m bar evaluates signals.
         """
-        # Normalize and append to minute_bars
-        ts: pd.Timestamp = pd.to_datetime(bar_data.get('timestamp'), utc=True)
+        # Normalize and append to minute_bars - ensure timezone-naive
+        ts: pd.Timestamp = pd.to_datetime(bar_data.get('timestamp'))
+        # Convert to timezone-naive if it has timezone info
+        if ts.tz is not None:
+            ts = ts.tz_localize(None)
+            
         row = {
             'open': float(bar_data.get('open', bar_data.get('Open', 0))),
             'high': float(bar_data.get('high', bar_data.get('High', 0))),
@@ -187,11 +196,27 @@ class IntradaySupertrendMA(StrategyBase):
         }
 
         # Market hours gate (optional; still store data)
-        if not self.is_market_open(ts.tz_convert('US/Eastern').to_pydatetime()):
-            return
+        try:
+            if ts is not None:
+                # Convert to Eastern time for market hours check, but keep naive
+                eastern_time = ts.tz_localize('UTC').tz_convert('US/Eastern').tz_localize(None)
+                if not self.is_market_open(eastern_time):
+                    return
+        except Exception as e:
+            # If timezone conversion fails, continue processing
+            print(f"[{self.name}] Warning: timezone conversion failed: {e}")
+            pass
 
         # Append to in-memory DataFrame
-        self.minute_bars.loc[ts] = row
+        try:
+            # Ensure minute_bars has a proper DatetimeIndex
+            if self.minute_bars.empty:
+                self.minute_bars = pd.DataFrame([row], index=pd.DatetimeIndex([ts]))
+            else:
+                self.minute_bars.loc[ts] = row
+        except Exception as e:
+            print(f"[{self.name}] Warning: failed to append bar: {e}")
+            return
 
         # Persist this minute to DB (base timeframe)
         try:
